@@ -5,6 +5,8 @@ export interface CommandResult {
   stdout: string;
   stderr: string;
   exitCode: number;
+  /** The signal that ended the child, when one did: the exit code is then KILLED_EXIT_CODE. */
+  signal?: string;
 }
 
 export interface CommandOptions {
@@ -45,8 +47,14 @@ export const processRunner: CommandRunner = (argv, options = {}) =>
       // An abort kills the child; its close event carries the signal.
       if (error.name !== "AbortError") resolve({ stdout, stderr: `${stderr}${error.message}\n`, exitCode: 127 });
     });
-    child.on("close", (code, signal) => resolve({ stdout, stderr, exitCode: code ?? (signal ? KILLED_EXIT_CODE : 1) }));
+    child.on("close", (code, signal) => resolve({ stdout, stderr, ...ended(code, signal) }));
   });
+
+/** How the child ended: its exit code, or the signal with the exit code a shell reports for it. */
+function ended(code: number | null, signal: string | null): { exitCode: number; signal?: string } {
+  if (code !== null) return { exitCode: code };
+  return signal ? { exitCode: KILLED_EXIT_CODE, signal } : { exitCode: 1 };
+}
 
 /** Runs the command attached to this process's terminal; the result's stdout and stderr are empty. */
 const attachedRunner: CommandRunner = (argv, options = {}) =>
@@ -58,5 +66,5 @@ const attachedRunner: CommandRunner = (argv, options = {}) =>
     }
     const child = spawn(command, args, { cwd: options.cwd, env: { ...process.env, ...options.env }, stdio: "inherit" });
     child.on("error", (error) => resolve({ stdout: "", stderr: `${error.message}\n`, exitCode: 127 }));
-    child.on("close", (code, signal) => resolve({ stdout: "", stderr: "", exitCode: code ?? (signal ? 128 : 1) }));
+    child.on("close", (code, signal) => resolve({ stdout: "", stderr: "", ...ended(code, signal) }));
   });

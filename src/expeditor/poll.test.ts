@@ -90,7 +90,7 @@ const issue = (n: number, title: string, updatedAt: string) => ({
   number: n, title, body: `${title} body.`, url: ISSUE(n), labels: [{ name: "bug" }], updatedAt,
 });
 const issues = (search: string, ...rows: object[]): ScriptedAnswer => ({
-  command: "gh", args: ["issue", "list", "--repo", "nomadec/kitchen", "--state", "all", "--limit", "200", "--search", search], stdout: JSON.stringify(rows),
+  command: "gh", args: ["issue", "list", "--repo", "nomadec/kitchen", "--state", "open", "--limit", "200", "--search", search], stdout: JSON.stringify(rows),
 });
 
 const GITHUB = source("kitchen-5", "github", "nomadec/kitchen", "2026-01-01T00:00:00Z");
@@ -113,7 +113,7 @@ test("a GitHub source poll with two issues updated since the cursor lays two ord
   const code = await k.run();
 
   assert.equal(code, 0, k.err.join(""));
-  assert.deepEqual(k.gh(), [["gh", "issue", "list", "--repo", "nomadec/kitchen", "--state", "all", "--limit", "200",
+  assert.deepEqual(k.gh(), [["gh", "issue", "list", "--repo", "nomadec/kitchen", "--state", "open", "--limit", "200",
     "--search", "sort:updated-asc updated:>=2026-01-01T00:00:00Z", "--json", "number,title,body,url,updatedAt"]]);
   assert.deepEqual(k.orders(), [
     [...EXPEDITOR, "create", "Stale cookie", "--type", "epic", "--labels", "loop",

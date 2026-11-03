@@ -5,7 +5,7 @@ export type { CliDeps, Command } from "./cli.ts";
 export { humanActor, stationActor, expeditorActor, actorName, parseActor, resolveActor, RULE } from "./actor.ts";
 export type { Actor } from "./actor.ts";
 export { openSpace, RefusedError, SpaceError, REGISTERED_TYPES } from "./space.ts";
-export type { Space, SpaceDeps, Bead, BeadRef, CreateFields, UpdateFields, ReadyFilter, ListFilter, BeadFilter, GateFields, GateCheck, JournalEvent } from "./space.ts";
+export type { Space, SpaceDeps, Bead, BeadRef, CreateFields, UpdateFields, BeadFilter, GateFields, PassFields, GateCheck, JournalEvent } from "./space.ts";
 export { parsePhaseFile, isPass, slugOf, phaseTitle, splitTitle, PhaseError, PHASE_KEYS } from "./recipe/phase.ts";
 export type { Phase, Edge, Budget } from "./recipe/phase.ts";
 export { lintBundle } from "./recipe/lint.ts";

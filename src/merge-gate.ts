@@ -10,7 +10,8 @@ import path from "node:path";
 import { parseArgs } from "node:util";
 import type { CliDeps } from "./cli.ts";
 import { openHostSpace } from "./commands/host-space.ts";
-import type { CommandResult, CommandRunner } from "./runner.ts";
+import { GitError, gitIn } from "./git.ts";
+import type { CommandResult } from "./runner.ts";
 import { SpaceError } from "./space.ts";
 import type { BeadRef, Space } from "./space.ts";
 
@@ -141,7 +142,7 @@ class Gate {
   private readonly deps: MergeGateDeps;
   private readonly space: Space;
   private readonly phase: BeadRef;
-  private readonly git: ReturnType<typeof gitIn>;
+  private readonly git: ReturnType<typeof gitHere>;
   private readonly branch: string;
   private pr: PullRequest;
   /** The last revision and base read, named by the note of a refusal that comes from git or gh itself. */
@@ -151,7 +152,7 @@ class Gate {
     this.deps = deps;
     this.space = space;
     this.phase = phase;
-    this.git = gitIn(deps.runner, deps.cwd);
+    this.git = gitHere(deps);
     this.branch = branch;
     this.pr = pr;
     this.last = { revision: pr.headRefOid, base: "not fetched" };
@@ -159,7 +160,7 @@ class Gate {
 
   /** Reads the worktree's branch and its open pull request; without one there is nothing to gate and no note. */
   static async open(deps: MergeGateDeps, space: Space, phase: BeadRef): Promise<Gate> {
-    const git = gitIn(deps.runner, deps.cwd);
+    const git = gitHere(deps);
     const branch = (await git(["rev-parse", "--abbrev-ref", "HEAD"])).stdout.trim();
     const pr = await prView(deps, ["number", "url", "state", "baseRefName", "headRefName", "headRefOid"]);
     if (pr.state !== "OPEN") throw new Refusal(`the pull request ${pr.url} is ${pr.state.toLowerCase()}, not open`);
@@ -298,6 +299,12 @@ async function gh(deps: MergeGateDeps, args: readonly string[]): Promise<Command
   return result;
 }
 
+/** `git -C <worktree> ...`: the shared git seam bound to the worktree the helper runs from. */
+function gitHere(deps: Pick<MergeGateDeps, "runner" | "cwd">) {
+  const git = gitIn(deps.runner);
+  return (args: readonly string[], options: { tolerate?: boolean } = {}): Promise<CommandResult> => git(deps.cwd, args, options);
+}
+
 /** The recorded form of one result: the line that names what ran, the tail of its output, the exit code. */
 function combined(label: string, result: CommandResult): string {
   const output = `${result.stdout}${result.stderr}`;
@@ -305,20 +312,4 @@ function combined(label: string, result: CommandResult): string {
   return `${label}\n${tail}${tail === "" || tail.endsWith("\n") ? "" : "\n"}exit ${result.exitCode}`;
 }
 
-/** A git or gh command that failed; the message names the command, the exit code and what it said. */
-class GitError extends Error {
-  constructor(argv: readonly string[], result: CommandResult) {
-    super(`${argv.join(" ")} failed (exit ${result.exitCode}): ${result.stderr.trim() || result.stdout.trim()}`);
-    this.name = "GitError";
-  }
-}
 
-/** `git -C <cwd> ...`; a non-zero exit throws unless the call tolerates one. As in src/expeditor/worktree.ts, kept private to each. */
-function gitIn(runner: CommandRunner, cwd: string) {
-  return async (args: readonly string[], options: { tolerate?: boolean } = {}): Promise<CommandResult> => {
-    const argv = ["git", "-C", cwd, ...args];
-    const result = await runner(argv);
-    if (result.exitCode !== 0 && !options.tolerate) throw new GitError(argv, result);
-    return result;
-  };
-}

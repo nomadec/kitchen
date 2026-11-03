@@ -20,6 +20,8 @@ export interface SourceFields {
   target: string;
   recipe: string;
   class: OrderClass;
+  /** Where the first poll starts: the registration instant for `github`, so the space starts without old work; empty for `file`. */
+  cursor: string;
 }
 
 export interface Source extends SourceFields {
@@ -44,13 +46,13 @@ export function isOrderClass(value: string): value is OrderClass {
   return (CLASSES as readonly string[]).includes(value);
 }
 
-/** The `bd create` fields of a source bead, with an empty cursor. */
+/** The `bd create` fields of a source bead. */
 export function sourceFields(source: SourceFields): CreateFields {
   return {
     title: `${source.kind}:${source.target}`,
     type: "source",
     labels: [`owner:${source.owner}`, `host:${source.host}`, `kind:${source.kind}`],
-    notes: [`target: ${source.target}`, `recipe: ${source.recipe}`, `class: ${source.class}`, "cursor:"].join("\n"),
+    notes: [`target: ${source.target}`, `recipe: ${source.recipe}`, `class: ${source.class}`, `cursor: ${source.cursor}`.trimEnd()].join("\n"),
   };
 }
 

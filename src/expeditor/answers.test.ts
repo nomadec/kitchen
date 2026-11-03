@@ -258,13 +258,59 @@ test("retry followed by anything but a station title (retry later) is some other
   assert.equal(k.log().find((line) => line.step === "passes" && line.pass)?.applied, "note");
 });
 
-test("retry on a no station for pass, which blocks its order with no phase laid behind it, reopens nothing and notes on the order that the phase is laid by hand", async (t) => {
+/** The entry phase intake laid unassigned behind a `no station for` pass: no assignee, no `station:` label. */
+const unassigned = (id: string, order: string, slug: string) => ({
+  id, title: `${slug}: Stale cookie`, status: "open", issue_type: "task", parent: order,
+  labels: [`phase:${slug}`], notes: "model: claude-opus-5\nentry: mechanical", description: PHASE_TEXT(slug),
+});
+const orderShown = (id: string, repos: string): ScriptedAnswer => ({
+  command: "bd", args: [...EXPEDITOR, "show", id], stdout: JSON.stringify([{ id, title: "Stale cookie", status: "open", issue_type: "epic", labels: ["loop"], notes: `repos: ${repos}\nrecipe: umka rev:a1b2c3d\nclass: bug` }]),
+});
+const ownerStations = (...rows: object[]): ScriptedAnswer => ({
+  command: "bd", args: [...EXPEDITOR, "list", "--type", "station", "--label", "owner:sona", "--limit"], stdout: JSON.stringify(rows),
+});
+
+test("retry <station title> on a no station for pass assigns the phase laid unassigned behind it to that station: assignee and station: label in one write, and it starts from bd ready in the same tick", async (t) => {
   const k = kitchen(t, [
     stations(station("kitchen-10", "oven")),
     NO_GATES,
     closedPasses(pass("kitchen-32", "no station for reproduce", "retry sona/oven", { parent: "kitchen-30" })),
-    behind("kitchen-32", { id: "kitchen-30", title: "Stale cookie", status: "open", issue_type: "epic", labels: ["loop"] }),
-    updated("kitchen-30"),
+    behind("kitchen-32", unassigned("kitchen-31", "kitchen-30", "reproduce")),
+    updated("kitchen-31"),
+    updated("kitchen-32"),
+    ready("oven", phase("kitchen-31", "kitchen-30", "reproduce", "oven")),
+    held(),
+    running("oven"),
+    claimed("oven", "kitchen-30"),
+    claimed("oven", "kitchen-31"),
+    turn("kitchen-31 closed\n"),
+    commented("kitchen-31"),
+    { command: "bd", args: [...EXPEDITOR, "show", "kitchen-30"], stdout: '[{"id":"kitchen-30","status":"in_progress","issue_type":"epic","assignee":"sona/oven"}]' },
+    released("oven", "kitchen-30"),
+    ...SETTLED,
+  ]);
+
+  assert.equal(await k.run(), 0, k.err.join(""));
+
+  assert.deepEqual(k.bd().filter((argv) => argv[2] === "update").slice(0, 2), [
+    [...EXPEDITOR, "update", "kitchen-31", "--add-label", "station:sona/oven", "--assignee", "sona/oven", "--status", "open", "--json"],
+    [...EXPEDITOR, "update", "kitchen-32", "--add-label", "applied", "--json"],
+  ]);
+  assert.equal(k.claude().length, 1, "the assigned phase is dispatched");
+  const applied = k.log().find((line) => line.step === "passes" && line.pass);
+  assert.deepEqual({ applied: applied?.applied, phases: applied?.phases, station: applied?.station }, { applied: "retry", phases: ["kitchen-31"], station: "sona/oven" });
+});
+
+test("retry alone on a no station for pass makes intake's mechanical choice again among the owner's stations as they are now, so a station registered since resumes the order", async (t) => {
+  const k = kitchen(t, [
+    stations(station("kitchen-10", "oven")),
+    NO_GATES,
+    closedPasses(pass("kitchen-32", "no station for reproduce", "retry", { parent: "kitchen-30" })),
+    behind("kitchen-32", unassigned("kitchen-31", "kitchen-30", "reproduce")),
+    orderShown("kitchen-30", "nomadec/kitchen"),
+    ownerStations(station("kitchen-10", "oven")),
+    running("oven"),
+    updated("kitchen-31"),
     updated("kitchen-32"),
     ready("oven"),
     held(),
@@ -275,11 +321,40 @@ test("retry on a no station for pass, which blocks its order with no phase laid 
   assert.equal(await k.run(), 0, k.err.join(""));
 
   assert.deepEqual(k.bd().filter((argv) => argv[2] === "update"), [
-    [...EXPEDITOR, "update", "kitchen-30", "--append-notes", 'kitchen-32 (no station for reproduce) closed with "retry sona/oven", but no phase is laid behind the pass: the order stays open for sona to continue by hand', "--json"],
+    [...EXPEDITOR, "update", "kitchen-31", "--add-label", "station:sona/oven", "--assignee", "sona/oven", "--status", "open", "--json"],
     [...EXPEDITOR, "update", "kitchen-32", "--add-label", "applied", "--json"],
   ]);
   const applied = k.log().find((line) => line.step === "passes" && line.pass);
-  assert.deepEqual({ applied: applied?.applied, phases: applied?.phases, station: applied?.station }, { applied: "retry", phases: [], station: "sona/oven" });
+  assert.deepEqual({ applied: applied?.applied, phases: applied?.phases, station: applied?.station }, { applied: "retry", phases: ["kitchen-31"], station: "sona/oven" });
+});
+
+test("retry alone on a no station for pass with still no station qualifying lays the pass again behind the phase, with the gap as it is now, and leaves the phase unassigned", async (t) => {
+  const k = kitchen(t, [
+    stations(station("kitchen-10", "oven")),
+    NO_GATES,
+    closedPasses(pass("kitchen-32", "no station for reproduce", "retry", { parent: "kitchen-30" })),
+    behind("kitchen-32", unassigned("kitchen-31", "kitchen-30", "reproduce")),
+    orderShown("kitchen-30", "sona-is/sona"),
+    ownerStations(station("kitchen-10", "oven")),
+    { command: "bd", args: [...EXPEDITOR, "gate", "create"], stdout: '{"id":"kitchen-33","title":"no station for reproduce","status":"open","issue_type":"gate","await_type":"human"}' },
+    updated("kitchen-33"),
+    updated("kitchen-32"),
+    ready("oven"),
+    held(),
+    running("oven"),
+    ...SETTLED,
+  ]);
+
+  assert.equal(await k.run(), 0, k.err.join(""));
+
+  assert.deepEqual(k.bd().filter((argv) => argv[2] === "update" || argv[2] === "gate"), [
+    [...EXPEDITOR, "gate", "check", "--json"],
+    [...EXPEDITOR, "gate", "create", "--type", "human", "--blocks", "kitchen-31", "--title", "no station for reproduce", "--reason", "reproduce needs model claude-opus-5 and sona-is/sona checked out; sona/oven lacks sona-is/sona", "--json"],
+    [...EXPEDITOR, "update", "kitchen-33", "--parent", "kitchen-30", "--assignee", "sona", "--json"],
+    [...EXPEDITOR, "update", "kitchen-32", "--add-label", "applied", "--json"],
+  ]);
+  const applied = k.log().find((line) => line.step === "passes" && line.pass);
+  assert.deepEqual({ applied: applied?.applied, phases: applied?.phases, relaid: applied?.relaid }, { applied: "retry", phases: [], relaid: "kitchen-33" });
 });
 
 test("a pass already labelled applied is skipped, as is a closed pass a recipe laid: the same tick run twice applies the word once", async (t) => {

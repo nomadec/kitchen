@@ -59,7 +59,7 @@ The template argument is the file, or a plugin directory holding `station.json`.
 | `--owner <person>` | The station's owner | the host config's owner |
 | `--host <hostname>` | The host the station runs on | the host config's host |
 | `--offers <prose>` | What the station offers | the template's |
-| `--secret <name>` | The name of a secret the host resolves at launch, repeatable. Names only; the value never reaches the space | none |
+| `--secret <name>` | The name of a secret the host resolves at launch, repeatable. Names only; the value never reaches the space. At launch the expeditor reads each name from its own environment, else from the file `~/.config/kitchen/secrets/<name>` (`$XDG_CONFIG_HOME/kitchen/secrets/<name>`; the value is its content, trailing newline dropped), into the session's environment, and refuses the start when a name is set nowhere, naming the file. A user service has a minimal environment, so the file is the usual place | none |
 | `--attended` | A human sits at this station; the expeditor never starts its turns, `kitchen turn` does | unattended |
 
 A missing required value is refused naming it, before any `bd` call. A `--repo` for a slug the template does not offer is refused too.

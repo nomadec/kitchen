@@ -172,6 +172,42 @@ test("lay phase: a phase the order's own pinned revision lacks is not read from 
   assert.equal(k.writes().length, 0);
 });
 
+test("lay phase without --station lays the phase unassigned, with no station: label and the gap as its unassigned: note, for a no station for pass to block and the person's retry <station> to assign", async (t) => {
+  const k = turn(t, [order(), phases(UMKA), children(child("kitchen-21", "implement", "in_progress")), created("kitchen-22", "pr: Stale cookie")]);
+
+  const code = await k.run("phase", "kitchen-20", "pr", "--why", "pr needs model claude-opus-5 and gh; sona/oven lacks gh", "--blocked-by", "kitchen-21");
+
+  assert.equal(code, 0, k.err.join(""));
+  assert.ok(!k.bd().some((argv) => argv[0] === "list" && argv[2] === "station"), "no station is read: none is checked");
+  assert.deepEqual(k.bd().at(-1), [
+    "create", "pr: Stale cookie",
+    "--type", "task",
+    "--parent", "kitchen-20", "--no-inherit-labels",
+    "--labels", "phase:pr",
+    "--notes", "model: claude-opus-5\nunassigned: pr needs model claude-opus-5 and gh; sona/oven lacks gh",
+    "--description", PHASE("pr", "", "[implement, fix]", "[review]"),
+    "--deps", "blocked-by:kitchen-21",
+    "--json",
+  ]);
+  assert.equal(k.out.join(""), "Laid pr as kitchen-22 unassigned, blocked by kitchen-21\n");
+});
+
+test("lay phase --behind <pass>: the phase is laid blocked by the pass and the rounds cap is passed over, since the person's word on the pass grants the round", async (t) => {
+  const review = registered({ slug: "review", text: PHASE("review", "rounds: 2\n", "[pr, address]", "[decide-blocking]") });
+  const k = turn(t, [
+    order(), phases(review), stations(OVEN),
+    children(child("kitchen-26", "review", "closed", "review: round 1"), child("kitchen-27", "review", "closed", "review: round 2")),
+    created("kitchen-29", "review: round 3"),
+  ]);
+
+  const code = await k.run("phase", "kitchen-20", "review", "--station", "sona/oven", "--why", "x", "--title", "round 3", "--behind", "kitchen-28");
+
+  assert.equal(code, 0, k.err.join(""));
+  const create = k.bd().find((argv) => argv[0] === "create");
+  assert.deepEqual(create?.slice(-3), ["--deps", "blocked-by:kitchen-28", "--json"]);
+  assert.equal(k.out.join(""), "Laid review as kitchen-29 at sona/oven, blocked by kitchen-28\n");
+});
+
 test("lay phase: a pass phase is never worked, so laying it as a phase is refused and lay pass is named", async (t) => {
   const k = turn(t, [order(), phases(UMKA), stations(OVEN)]);
   assert.equal(await k.run("phase", "kitchen-20", "approve-spec", "--station", "sona/oven", "--why", "x"), 2);
@@ -327,7 +363,7 @@ test("lay: an unknown subcommand or a missing argument prints the usage and fail
   assert.equal(await k.run("bake", "kitchen-20"), 1);
   assert.match(k.err.join(""), /^lay: unknown subcommand bake\n\nUsage: lay <subcommand>/);
   assert.equal(await k.run("phase", "kitchen-20"), 1);
-  assert.match(k.err.join(""), /lay phase <order> <slug> --station <title> --why <reason>/);
+  assert.match(k.err.join(""), /lay phase <order> <slug> \[--station <title>\] --why <reason>/);
   assert.equal(await k.run("pass", "kitchen-20", "--blocks", "kitchen-22"), 1);
   assert.match(k.err.join(""), /--brief <text>/);
   assert.equal(k.runner.calls.length, 0);

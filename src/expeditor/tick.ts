@@ -14,7 +14,7 @@ import type { LaidPhase } from "../laid.ts";
 import { LOOP } from "../order.ts";
 import { readStations } from "../registered.ts";
 import type { CommandRunner } from "../runner.ts";
-import { openSpace, SpaceError } from "../space.ts";
+import { openSpace, RefusedError, SpaceError } from "../space.ts";
 import type { Space } from "../space.ts";
 import type { Station } from "../station.ts";
 import { APPLIED, applyWord, kitchenLaid } from "./answers.ts";
@@ -23,7 +23,7 @@ import type { Log } from "./log.ts";
 import { pollSources } from "./poll.ts";
 import { endTurn, HEARTBEAT_INTERVAL_MS, startTurn, TURN_FAILED } from "./turn.ts";
 import type { Turn, TurnEnd } from "./turn.ts";
-import { removeWorktree, worktreeOrders, worktreePath } from "./worktree.ts";
+import { removeWorktree, worktreeOrders, worktreePath, WorktreeError } from "./worktree.ts";
 
 /** The steps of a tick, in order. */
 export const TICK_STEPS = [
@@ -50,10 +50,13 @@ export interface TickReport {
   laid: string[];
 }
 
+/** How one started turn ended: its end, or the failure of the ending itself (a bd call refused), logged and left to `bd reclaim`. */
+export type TurnEnding = TurnEnd | { failed: string };
+
 export interface Expeditor {
   tick(): Promise<TickReport>;
   /** Resolves when every turn started so far has ended. */
-  settle(): Promise<TurnEnd[]>;
+  settle(): Promise<TurnEnding[]>;
 }
 
 /** A ready phase with the station it is assigned to. */
@@ -79,17 +82,12 @@ interface TickState {
 
 export function expeditor(deps: ExpeditorDeps): Expeditor {
   let count = 0;
-  const endings: Promise<TurnEnd>[] = [];
+  const endings: Promise<TurnEnding>[] = [];
   /** The phases of the turns whose children live now. */
   const alivePhases = new Set<string>();
 
   const log = (tick: number, step: TickStep, fields: Record<string, unknown> = {}): void => {
     deps.log.write({ tick, step, ...fields });
-  };
-
-  /** A step a later slice fills: named and logged in its place in the order. */
-  const later = (step: TickStep, what: string) => async (state: TickState): Promise<void> => {
-    log(state.report.tick, step, { skipped: `${what}: a later slice` });
   };
 
   /** Why a phase cannot start now: its order is held, or its station is at its cap. */
@@ -196,10 +194,17 @@ export function expeditor(deps: ExpeditorDeps): Expeditor {
       const removed: string[] = [];
       const kept: string[] = [];
       for (const [order, paths] of holding) {
-        const closed = (await state.space.show(order)).status === "closed";
-        for (const checkout of paths) {
-          if (closed) removed.push(await removeWorktree(deps.runner, checkout, order));
-          else kept.push(worktreePath(checkout, order));
+        // One order's cleanup failing (its bead gone, a worktree git refuses to remove, a stray
+        // directory) is logged and leaves the rest of the tick to run; the next tick tries it again.
+        try {
+          const closed = (await state.space.show(order)).status === "closed";
+          for (const checkout of paths) {
+            if (closed) removed.push(await removeWorktree(deps.runner, checkout, order));
+            else kept.push(worktreePath(checkout, order));
+          }
+        } catch (error) {
+          if (!(error instanceof SpaceError || error instanceof WorktreeError)) throw error;
+          log(state.report.tick, "worktrees", { order, failed: error.message });
         }
       }
       log(state.report.tick, "worktrees", { removed, kept });
@@ -293,7 +298,7 @@ export function expeditor(deps: ExpeditorDeps): Expeditor {
           start.turn,
         );
         endings.push(
-          ending.finally(() => alivePhases.delete(phase.id)).then((end) => {
+          ending.finally(() => alivePhases.delete(phase.id)).then((end): TurnEnding => {
             deps.log.write({
               tick, step: "turn", phase: phase.id, order: phase.order, station: station.title,
               exit: end.exitCode, result: end.resultLine, outcome: end.outcome,
@@ -301,6 +306,13 @@ export function expeditor(deps: ExpeditorDeps): Expeditor {
               ...(end.pass === undefined ? {} : { pass: end.pass }),
             });
             return end;
+          }, (error: unknown): TurnEnding => {
+            // A bd call the ending needed was refused (bd unreachable, the lease taken elsewhere): the
+            // service goes on, and the phase and its take are bd reclaim's once their leases go stale.
+            if (!(error instanceof SpaceError || error instanceof RefusedError)) throw error;
+            const failed = error.message;
+            deps.log.write({ tick, step: "turn", phase: phase.id, order: phase.order, station: station.title, failed });
+            return { failed };
           }),
         );
       }

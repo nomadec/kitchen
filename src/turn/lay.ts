@@ -4,8 +4,10 @@
 // wrapper as `<owner>/<station>`. What it judges is mechanical only: the station chosen by the driver
 // lists the phase's model and every repository the order names; a phase is laid from the order's pinned
 // revision, or pins the recipe an edge crosses into; a pass phase is never laid as a phase; the rounds
-// cap is counted; a pass is never closed. The prose judgments (needs against offers, `when`, `skip
-// when`, the answer on a pass) stay with the driver.
+// cap is counted, and passed over only for a phase laid behind a pass (`--behind`), where the person's
+// word grants the round; a phase laid with no `--station` waits unassigned behind a `no station for`
+// pass for the person's `retry <station>`; a pass is never closed. The prose judgments (needs against
+// offers, `when`, `skip when`, the answer on a pass) stay with the driver.
 import { parseActor } from "../actor.ts";
 import { readHostConfig } from "../config.ts";
 import { labelValue, withNoteLine } from "../fields.ts";
@@ -35,7 +37,7 @@ export const EXIT = { ok: 0, usage: 1, refused: 2, rounds: 3 } as const;
 
 export const USAGE = `Usage: lay <subcommand>
 
-  lay phase <order> <slug> --station <title> --why <reason> [--blocked-by <id>]... [--title <qualifier>] [--note <line>]...
+  lay phase <order> <slug> [--station <title>] --why <reason> [--blocked-by <id>]... [--behind <pass>] [--title <qualifier>] [--note <line>]...
   lay pass <order> [<pass slug>] [--title <title>] [--blocks <id>] --brief <text>   (--brief - reads stdin)
   lay assign <phase> --station <title> --why <reason>
   lay dep <id> <blocked-by>...
@@ -67,8 +69,9 @@ interface Args {
   options: Map<string, string[]>;
 }
 
-/** The note a laid phase carries beside its model: why the driver chose the station. */
+/** The note a laid phase carries beside its model: why the driver chose the station, or, laid with none, what every station lacks. */
 const ASSIGNED = "assigned";
+const UNASSIGNED = "unassigned";
 
 /** The `phase:<slug>` label and the `station:<title>` label of a laid phase. */
 const phaseLabel = (slug: string) => `phase:${slug}`;
@@ -122,11 +125,12 @@ type Subcommand = (context: Context) => Promise<void>;
 
 const SUBCOMMANDS: Record<string, Subcommand> = {
   async phase({ space, args, deps }) {
-    const given = positional(args, 2, "lay phase <order> <slug> --station <title> --why <reason>");
+    const given = positional(args, 2, "lay phase <order> <slug> [--station <title>] --why <reason>");
     const [orderId, slug] = [given.at(0), given.at(1)];
-    const stationTitle = option(args, "station", "lay phase needs --station <title>");
-    const why = option(args, "why", "lay phase needs --why <reason>: the note saying why this station");
-    const blockedBy = args.options.get("blocked-by") ?? [];
+    const stationTitle = args.options.get("station")?.[0];
+    const why = option(args, "why", "lay phase needs --why <reason>: the note saying why this station, or what every station lacks");
+    const behind = args.options.get("behind")?.[0];
+    const blockedBy = [...(args.options.get("blocked-by") ?? []), ...(behind === undefined ? [] : [behind])];
     const qualifier = args.options.get("title")?.[0];
     const notes = args.options.get("note") ?? [];
 
@@ -134,7 +138,7 @@ const SUBCOMMANDS: Record<string, Subcommand> = {
     const order = parseOrder(orderBead);
     const found = await registeredPhase(space, orderBead, slug);
     if (isPass(found.phase)) throw new LayRefusal(`${slug} is a pass phase (skill: human): lay it with lay pass`);
-    const station = await qualifyingStation(space, stationTitle, found.phase, order);
+    const station = stationTitle === undefined ? undefined : await qualifyingStation(space, stationTitle, found.phase, order);
     const children = await space.list({ parent: order.id, all: true });
 
     const title = `${slug}: ${qualifier ?? order.title}`;
@@ -145,7 +149,8 @@ const SUBCOMMANDS: Record<string, Subcommand> = {
       return;
     }
     const laid = children.filter((child) => labelValue(child, "phase") === slug).length;
-    if (found.phase.rounds !== undefined && laid >= found.phase.rounds) {
+    // Behind a pass the cap is the person's to pass over: their word on the pass grants the round.
+    if (behind === undefined && found.phase.rounds !== undefined && laid >= found.phase.rounds) {
       throw new LayRefusal(`rounds reached: ${slug} (${laid} laid, rounds: ${found.phase.rounds})`, EXIT.rounds);
     }
     // Umka's rule: an open sibling whose phase the new one lists under `from` finishes first.
@@ -164,15 +169,15 @@ const SUBCOMMANDS: Record<string, Subcommand> = {
       title,
       type: "task",
       parent: order.id,
-      labels: [phaseLabel(slug), stationLabel(station.title)],
-      notes: [`model: ${found.phase.model ?? ""}`, `${ASSIGNED}: ${why}`, ...notes].join("\n"),
+      labels: [phaseLabel(slug), ...(station ? [stationLabel(station.title)] : [])],
+      notes: [`model: ${found.phase.model ?? ""}`, `${station ? ASSIGNED : UNASSIGNED}: ${why}`, ...notes].join("\n"),
       description: found.phase.text,
-      assignee: station.title,
+      ...(station ? { assignee: station.title } : {}),
       ...(blockedBy.length ? { blockedBy } : {}),
     });
     for (const sibling of siblings) await space.addDependency(bead.id, sibling);
     const blockers = [...blockedBy, ...siblings];
-    deps.stdout(`Laid ${slug} as ${bead.id} at ${station.title}${blockers.length ? `, blocked by ${blockers.join(", ")}` : ""}\n`);
+    deps.stdout(`Laid ${slug} as ${bead.id} ${station ? `at ${station.title}` : "unassigned"}${blockers.length ? `, blocked by ${blockers.join(", ")}` : ""}\n`);
   },
 
   async pass({ space, owner, args, deps }) {
@@ -193,9 +198,7 @@ const SUBCOMMANDS: Record<string, Subcommand> = {
     const blocks = args.options.get("blocks")?.[0] ?? order.id;
     const brief = briefArg === "-" ? (await readStdin(deps)).trim() : briefArg;
 
-    const gate = await space.layGate({ blocks, type: "human", title: title ?? "", reason: brief });
-    // bd gate create takes no parent, labels or assignee: a second call makes the pass the order's child, for the owner.
-    await space.update(gate, { parent: order.id, ...(slug !== undefined ? { addLabels: [phaseLabel(slug)] } : {}), assignee: owner });
+    const gate = await space.layPass({ order: order.id, blocks, title: title ?? "", brief, owner, ...(slug !== undefined ? { labels: [phaseLabel(slug)] } : {}) });
     deps.stdout(`Laid pass ${slug ?? title} as ${gate.id} for ${owner}, blocking ${blocks}\n`);
   },
 

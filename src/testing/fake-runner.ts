@@ -16,6 +16,8 @@ export interface ScriptedAnswer {
   stdout?: string;
   stderr?: string;
   exitCode?: number;
+  /** The signal that ended the child, as a stop of the service ends every turn's child. */
+  signal?: string;
   /** How long the child lives on the clock before it answers, in milliseconds; answers at once when absent. */
   lasts?: number;
   /** The row answers one call and is then spent, so the next matching row answers the same call after: a value that moves between reads. */
@@ -43,9 +45,9 @@ export function fakeRunner(table: readonly ScriptedAnswer[], clock?: Clock): Fak
     if (row.lasts !== undefined) {
       if (!clock) throw new Error(`a row that lasts needs the fake runner built with a clock: ${argv.join(" ")}`);
       const lived = await sleptOut(clock, row.lasts, options.signal ?? new AbortController().signal);
-      if (!lived) return { stdout: "", stderr: "", exitCode: KILLED_EXIT_CODE };
+      if (!lived) return { stdout: "", stderr: "", exitCode: KILLED_EXIT_CODE, signal: "SIGTERM" };
     }
-    return { stdout: row.stdout ?? "", stderr: row.stderr ?? "", exitCode: row.exitCode ?? 0 };
+    return { stdout: row.stdout ?? "", stderr: row.stderr ?? "", exitCode: row.exitCode ?? 0, ...(row.signal === undefined ? {} : { signal: row.signal }) };
   };
   return Object.assign(runner, { calls });
 }

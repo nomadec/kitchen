@@ -10,7 +10,7 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/merge-gate.mjs" <phase>
 
 ## The `VERIFY` file
 
-The verify commands come from a file inside the repository, read from the order's worktree: `VERIFY` at the repository root. One command per line, run in order by `sh -c` in the worktree, each with the exit code deciding:
+The verify commands come from a file inside the repository, read from the order's worktree: `VERIFY` at the repository root. One command per line, run in order by `sh -c` in the worktree, each with the exit code deciding. The file is read from the branch being merged, so whoever commits to that branch decides what the merge phase runs on the station, with the station's own trust (`docs/trust-model.md`): the gate verifies that the branch passes its own commands, and the pull request review is where a change to `VERIFY` itself is judged.
 
 ```
 # how the branch meets the base: merge (the default) or rebase

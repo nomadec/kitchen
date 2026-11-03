@@ -2,13 +2,17 @@
 // per repository the order names, under `<station checkout>/.kitchen/worktrees/<order>` on branch
 // `kitchen/<order>`: created at the first code-touching phase from the remote branch when another
 // host's turn pushed one, else from the checkout's base branch; reused after; removed on a later
-// tick once the order is closed. The worktree's own git config carries the owner as author and the
-// hook that adds the `Kitchen-Station:` trailer, so commits made in a turn read as the owner's and
-// name the station. Everything git is one command at a time through the runner.
+// tick once the order is closed. The worktree's own git config carries the owner as author (the email
+// stays the checkout's own) and a hooks directory that forwards every hook to the repository's own and
+// adds the `Kitchen-Station:` trailer, so commits made in a turn read as the owner's, name the station
+// and still run what the project installed. Everything git is one command at a time through the runner.
 import fs from "node:fs";
 import path from "node:path";
-import type { CommandResult, CommandRunner } from "../runner.ts";
+import { GitError, gitIn } from "../git.ts";
+import type { CommandRunner } from "../runner.ts";
 import type { Station } from "../station.ts";
+
+export { GitError as WorktreeError };
 
 /** The directory under a station checkout that Kitchen owns: the worktrees and the hooks. */
 export const KITCHEN_DIR = ".kitchen";
@@ -38,24 +42,34 @@ export interface Worktree {
   path: string;
 }
 
-/** A git command that failed; the message names the command, the exit code and what git said. */
-export class WorktreeError extends Error {
-  constructor(argv: readonly string[], result: CommandResult) {
-    super(`${argv.join(" ")} failed (exit ${result.exitCode}): ${result.stderr.trim() || result.stdout.trim()}`);
-    this.name = "WorktreeError";
-  }
-}
 
 /**
- * The hook `core.hooksPath` points a worktree at. It runs the repository's own hook first, so what
- * beads or the project installed under `.git/hooks` keeps running in the worktree, then adds the
- * trailer naming the station the worktree's own config carries.
+ * The client-side hooks git runs, each of which the worktree's hooks directory forwards to the
+ * repository's own hook of that name, so pointing `core.hooksPath` at it disables nothing the project
+ * or beads installed.
  */
-export const TRAILER_HOOK = `#!/bin/sh
-# Kitchen: runs the repository's own prepare-commit-msg hook, then adds the ${STATION_TRAILER} trailer.
-hooks="$(git rev-parse --git-common-dir)/hooks"
-if [ -x "$hooks/prepare-commit-msg" ]; then "$hooks/prepare-commit-msg" "$@" || exit $?; fi
-station=$(git config kitchen.station) || exit 0
+export const FORWARDED_HOOKS: readonly string[] = [
+  "applypatch-msg", "pre-applypatch", "post-applypatch", "pre-commit", "pre-merge-commit", "prepare-commit-msg",
+  "commit-msg", "post-commit", "pre-rebase", "post-checkout", "post-merge", "pre-push", "post-rewrite",
+  "pre-auto-gc", "post-index-change", "reference-transaction", "sendemail-validate",
+];
+
+/**
+ * The lines every hook under `.kitchen/hooks` starts with: find the repository's own hooks directory
+ * (its `core.hooksPath`, global or in the repository's config, else `.git/hooks`; a relative path is
+ * relative to the main checkout) and run the hook of the same name there when it exists.
+ */
+const FORWARD = `#!/bin/sh
+# Kitchen: runs the repository's own hook of this name, so the worktree keeps every hook the project or beads installed.
+common="$(git rev-parse --git-common-dir)"
+hooks="$(git config --file "$common/config" core.hooksPath 2>/dev/null || git config --global core.hooksPath 2>/dev/null || echo "$common/hooks")"
+case "$hooks" in /*) ;; *) hooks="$(cd "$common/.." && pwd)/$hooks" ;; esac
+name="$(basename "$0")"
+if [ -x "$hooks/$name" ]; then "$hooks/$name" "$@" || exit $?; fi
+`;
+
+/** The prepare-commit-msg hook: the forward, then the trailer naming the station the worktree's own config carries. */
+export const TRAILER_HOOK = `${FORWARD}station=$(git config kitchen.station) || exit 0
 git interpret-trailers --in-place --if-exists doNothing --trailer "${STATION_TRAILER}: $station" "$1"
 `;
 
@@ -108,18 +122,12 @@ export async function removeWorktree(runner: CommandRunner, checkout: string, or
   return target;
 }
 
+/** Writes the forwarding hooks and the trailer hook under the checkout's `.kitchen/hooks`. */
 function writeTrailerHook(checkout: string): void {
   const dir = hooksPath(checkout);
   fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(path.join(dir, "prepare-commit-msg"), TRAILER_HOOK, { mode: 0o755 });
+  for (const name of FORWARDED_HOOKS) {
+    fs.writeFileSync(path.join(dir, name), name === "prepare-commit-msg" ? TRAILER_HOOK : FORWARD, { mode: 0o755 });
+  }
 }
 
-/** `git -C <dir> ...`; a non-zero exit throws unless the call tolerates one (a check, not a change). */
-function gitIn(runner: CommandRunner) {
-  return async (dir: string, args: readonly string[], options: { tolerate?: boolean } = {}): Promise<CommandResult> => {
-    const argv = ["git", "-C", dir, ...args];
-    const result = await runner(argv);
-    if (result.exitCode !== 0 && !options.tolerate) throw new WorktreeError(argv, result);
-    return result;
-  };
-}

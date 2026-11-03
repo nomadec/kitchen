@@ -13,7 +13,7 @@ The review inspected the issue and its clarification comment, repository docs, t
 
 ## Running and recording QA
 
-Use an isolated test space and disposable repositories. Record the Kitchen revision, beads and Claude Code versions, recipe revision, hosts and stations used, and relevant bead IDs. For each check record PASS, FAIL, BLOCKED, or NOT RUN, with evidence and any follow-up issue. Check a box only after its outcome has been demonstrated. Do not record credentials or token contents.
+Use an isolated test space and disposable repositories. Record the Kitchen commit, beads and Claude Code versions, recipe revision, hosts and stations used, and relevant bead IDs. For each check record PASS, FAIL, BLOCKED, or NOT RUN, with evidence and any follow-up issue. Check a box only after its outcome has been demonstrated. Do not record credentials or token contents.
 
 Repeat concurrency checks with overlapping operations, not just sequential runs. Use controlled faults or a suitable test harness where needed. Supplement fake-command tests with real integration evidence for claims, recovery, human interaction, and host handoffs.
 
@@ -123,7 +123,7 @@ Repeat concurrency checks with overlapping operations, not just sequential runs.
 - [ ] Configured budgets produce the intended runtime limits; old values are deliberately migrated or rejected, never silently reinterpreted as dollars.
 - [ ] Umka's merge and close-out behavior meets Kitchen's verification, result-line, and cleanup requirements.
 
-## 10. Merge verifies the revision that will be merged
+## 10. Merge verifies the commit that will be merged
 
 **Original concern:** fetching the base branch does not itself update the order's worktree or demonstrate that verification passed against the current base.
 
@@ -133,7 +133,7 @@ Repeat concurrency checks with overlapping operations, not just sequential runs.
 - [ ] Run every configured repository verification command in order and record the results on the phase bead.
 - [ ] A failing verification command prevents merging.
 - [ ] If the base or proposed merge content changes after verification, stale success is not accepted as proof for different content.
-- [ ] Evidence identifies the tested revision and base and connects them to the content ultimately merged.
+- [ ] Evidence identifies the tested commit and base and connects them to the content ultimately merged.
 
 ## Minimum integration coverage
 
@@ -149,7 +149,7 @@ The original smoke stops too early to demonstrate several of these outcomes. Pre
 Copy this section for each QA run. Link detailed evidence or follow-up issues where needed.
 
 - Date:
-- Kitchen revision:
+- Kitchen commit:
 - Recipe revision:
 - Tool versions:
 - Test space, repositories, hosts, and stations:
@@ -174,7 +174,7 @@ Copy this section for each QA run. Link detailed evidence or follow-up issues wh
 The hand-run smoke, `node scripts/smoke.ts` (README, The smoke), on the development host, twice: once against the real `claude`, which is not signed in on this host, and once with the stand-in `claude` shipped under `scripts/smoke-standin` first on the path, a shell script that does what the `kitchen:turn` skill asks for the fixture's two worked phases, through the lay helper under the station actor. The second run proves the harness (every `bd` write and read, the expeditor, `kitchen pass`, the answer applied once) and nothing about the turn driver's prose; the first is the release gate and stays BLOCKED until a signed-in `claude` runs it.
 
 - Date: 2026-11-03
-- Kitchen revision: `9dc3b67` (this slice's first commit on `altcode/ALT-160`, as the smoke's header printed) with the review changes in the working tree at run time; the final commit is recorded on the slice's task
+- Kitchen commit: `9dc3b67` (this slice's first commit on `altcode/ALT-160`, as the smoke's header printed) with the review changes in the working tree at run time; the final commit is recorded on the slice's task
 - Recipe revision: the smoke fixture `scripts/smoke-fixture`, `smoke rev:5dcf53d` (three phases: `greet`, the pass `approve`, `confirm`); the migrated Umka plugin was not available (story 79 lives in nomadec/marketplace)
 - Tool versions: bd 1.3.1 (c1c4b642a), claude 2.1.316 (Claude Code), Node v24.21.0, Dolt 2.6.2 as a throwaway `dolt sql-server` on 127.0.0.1:3399
 - Test space, repositories, hosts, and stations: one database per run on that server (`kitchen_smoke_20261103_083810` real claude; `kitchen_smoke_20261103_083833` stand-in), no repository (the fixture's station offers none, so the order touches no code), host `bos-umid-kushayev-paperclip-rbn3`, owner `smoke`, one unattended station `smoke/smoke` (cap 1, timeout 10m)

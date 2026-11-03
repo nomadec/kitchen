@@ -3,6 +3,7 @@
 // complete it. Both directions live here: the bead a template and values become, and the station read
 // back from a bead. Nothing of Node here: the browser's Stations view reads stations through this too.
 import { labelValue, noteLine } from "./fields.ts";
+import type { Budget } from "./recipe/phase.ts";
 import type { Bead, CreateFields } from "./space.ts";
 
 /** The shape a template gives: everything in the launch spec that is not about one host. */
@@ -23,11 +24,6 @@ export interface StationTemplate {
   worktrees: string;
   /** The budget per turn. */
   budget: Budget;
-}
-
-export interface Budget {
-  usd: number;
-  effort: string;
 }
 
 /** The part of a station that says how to start a turn. Provider-neutral in shape; secrets are names only. */

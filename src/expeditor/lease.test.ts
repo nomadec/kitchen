@@ -14,11 +14,12 @@ import type { ScriptedAnswer } from "../testing/index.ts";
 const EXPEDITOR = ["--actor", "sona/expeditor"];
 const OVEN = ["--actor", "sona/oven"];
 
-/** Beneath every table: no gate open and no closed pass to apply (answers.test.ts scripts those). */
+/** Beneath every table: no gate open and no closed pass to apply (answers.test.ts scripts those), and the order read back at the turn's end still held by the oven. */
 const QUIET: ScriptedAnswer[] = [
   { command: "bd", args: [...EXPEDITOR, "gate", "check", "--json"], stdout: "No open gates found.\n" },
   { command: "bd", args: [...EXPEDITOR, "list", "--type", "source"], stdout: "[]" },
   { command: "bd", args: [...EXPEDITOR, "list", "--type", "gate"], stdout: "[]" },
+  { command: "bd", args: [...EXPEDITOR, "show", "kitchen-20"], stdout: JSON.stringify([{ id: "kitchen-20", title: "Stale cookie", status: "in_progress", issue_type: "epic", assignee: "sona/oven" }]) },
 ];
 
 function kitchen(t: { after(fn: () => void): void }, table: ScriptedAnswer[]) {
@@ -130,22 +131,20 @@ test("while the child runs, the phase and its order are heartbeated as the stati
   assert.deepEqual(k.bd().at(-1), [...OVEN, "update", "kitchen-20", "--status", "open", "--assignee", "", "--json"], "the take is released last");
 });
 
-test("a child exiting non-zero with its phase open has the phase released by the station and restored by the expeditor to its station: label with failed:1, then the order released", async (t) => {
+test("a child exiting non-zero with its phase open has the phase set open again by the station, the holder, still assigned to its station: label and counted failed:1 in that one write, then the order released", async (t) => {
   const k = kitchen(t, [
     ...oneTurn(phase("kitchen-21", "kitchen-20", "reproduce", "oven")),
     turn("Working...\n", { exitCode: 3 }),
-    commented("kitchen-21"),
     shown(phase("kitchen-21", "kitchen-20", "reproduce", "oven", { status: "in_progress" })),
-    released("oven", "kitchen-21"),
-    updated(EXPEDITOR, "kitchen-21"),
+    commented("kitchen-21"),
+    updated(OVEN, "kitchen-21"),
     released("oven", "kitchen-20"),
   ]);
 
   assert.equal(await k.run(), 0, k.err.join(""));
 
   assert.deepEqual(k.bd().filter((argv) => argv[2] === "update" && !argv.includes("--claim")), [
-    [...OVEN, "update", "kitchen-21", "--status", "open", "--assignee", "", "--json"],
-    [...EXPEDITOR, "update", "kitchen-21", "--add-label", "failed:1", "--assignee", "sona/oven", "--json"],
+    [...OVEN, "update", "kitchen-21", "--add-label", "failed:1", "--assignee", "sona/oven", "--status", "open", "--json"],
     [...OVEN, "update", "kitchen-20", "--status", "open", "--assignee", "", "--json"],
   ]);
   assert.ok(!k.bd().some((argv) => argv[2] === "gate" && argv[3] === "create"), "one failure lays no pass");
@@ -157,10 +156,9 @@ test("a second failure counts failed:2 in place of failed:1, lays the turn faile
   const k = kitchen(t, [
     ...oneTurn(phase("kitchen-21", "kitchen-20", "reproduce", "oven", { labels: ["failed:1"] })),
     turn("", { exitCode: 1 }),
-    commented("kitchen-21"),
     shown(phase("kitchen-21", "kitchen-20", "reproduce", "oven", { status: "in_progress", labels: ["failed:1"] })),
-    released("oven", "kitchen-21"),
-    updated(EXPEDITOR, "kitchen-21"),
+    commented("kitchen-21"),
+    updated(OVEN, "kitchen-21"),
     passLaid("kitchen-22", "turn failed: reproduce"),
     updated(EXPEDITOR, "kitchen-22"),
     released("oven", "kitchen-20"),
@@ -169,8 +167,7 @@ test("a second failure counts failed:2 in place of failed:1, lays the turn faile
   assert.equal(await k.run(), 0, k.err.join(""));
 
   assert.deepEqual(k.bd().filter((argv) => (argv[2] === "update" && !argv.includes("--claim")) || (argv[2] === "gate" && argv[3] === "create")), [
-    [...OVEN, "update", "kitchen-21", "--status", "open", "--assignee", "", "--json"],
-    [...EXPEDITOR, "update", "kitchen-21", "--add-label", "failed:2", "--remove-label", "failed:1", "--assignee", "sona/oven", "--json"],
+    [...OVEN, "update", "kitchen-21", "--add-label", "failed:2", "--remove-label", "failed:1", "--assignee", "sona/oven", "--status", "open", "--json"],
     [...EXPEDITOR, "gate", "create", "--type", "human", "--blocks", "kitchen-21", "--title", "turn failed: reproduce", "--reason", "kitchen-21 (reproduce: Stale cookie) failed 2 times on sona/oven; the last turn exit 1: exit 1", "--json"],
     [...EXPEDITOR, "update", "kitchen-22", "--parent", "kitchen-20", "--assignee", "sona", "--json"],
     [...OVEN, "update", "kitchen-20", "--status", "open", "--assignee", "", "--json"],
@@ -192,10 +189,9 @@ test("a child that outlives the station's wall-clock timeout is killed, the kill
     heartbeat("oven", "kitchen-21"),
     heartbeat("oven", "kitchen-20"),
     turn("never\n", { lasts: 60 * MINUTE }),
-    commented("kitchen-21"),
     shown(phase("kitchen-21", "kitchen-20", "reproduce", "oven", { status: "in_progress" })),
-    released("oven", "kitchen-21"),
-    updated(EXPEDITOR, "kitchen-21"),
+    commented("kitchen-21"),
+    updated(OVEN, "kitchen-21"),
     released("oven", "kitchen-20"),
   ]);
 
@@ -211,8 +207,8 @@ test("a child that outlives the station's wall-clock timeout is killed, the kill
   const end = k.log().findLast((line) => line.step === "turn");
   assert.deepEqual({ exit: end?.exit, result: end?.result, failure: end?.failure, failures: end?.failures }, { exit: 128, result: "exit 128", failure: "killed at the wall-clock timeout of 2m", failures: 1 });
   assert.deepEqual(k.bd().slice(-3), [
-    [...OVEN, "update", "kitchen-21", "--status", "open", "--assignee", "", "--json"],
-    [...EXPEDITOR, "update", "kitchen-21", "--add-label", "failed:1", "--assignee", "sona/oven", "--json"],
+    [...OVEN, "update", "kitchen-21", "--add-label", "failed:1", "--assignee", "sona/oven", "--status", "open", "--json"],
+    [...EXPEDITOR, "show", "kitchen-20", "--json"],
     [...OVEN, "update", "kitchen-20", "--status", "open", "--assignee", "", "--json"],
   ]);
 });
@@ -221,38 +217,99 @@ test("a child that exits clean without closing its phase has the phase reclaimed
   const k = kitchen(t, [
     ...oneTurn(phase("kitchen-21", "kitchen-20", "reproduce", "oven")),
     turn("stopped early\n"),
-    commented("kitchen-21"),
     shown(phase("kitchen-21", "kitchen-20", "reproduce", "oven", { status: "in_progress" })),
-    released("oven", "kitchen-21"),
-    updated(EXPEDITOR, "kitchen-21"),
+    commented("kitchen-21"),
+    updated(OVEN, "kitchen-21"),
     released("oven", "kitchen-20"),
   ]);
 
   assert.equal(await k.run(), 0, k.err.join(""));
 
-  assert.deepEqual(k.bd().slice(-4), [
+  assert.deepEqual(k.bd().slice(-5), [
     [...EXPEDITOR, "show", "kitchen-21", "--json"],
-    [...OVEN, "update", "kitchen-21", "--status", "open", "--assignee", "", "--json"],
-    [...EXPEDITOR, "update", "kitchen-21", "--assignee", "sona/oven", "--json"],
+    [...EXPEDITOR, "comments", "add", "kitchen-21", "stopped early", "--json"],
+    [...OVEN, "update", "kitchen-21", "--assignee", "sona/oven", "--status", "open", "--json"],
+    [...EXPEDITOR, "show", "kitchen-20", "--json"],
     [...OVEN, "update", "kitchen-20", "--status", "open", "--assignee", "", "--json"],
   ]);
   const end = k.log().find((line) => line.step === "turn");
   assert.deepEqual({ exit: end?.exit, outcome: end?.outcome, failures: end?.failures }, { exit: 0, outcome: "reclaimed", failures: undefined });
 });
 
+test("a child a signal ended that was not the wall clock's (the service stopped under it) is reclaimed, not failed: no count, no pass, and a restart loses nothing", async (t) => {
+  const k = kitchen(t, [
+    ...oneTurn(phase("kitchen-21", "kitchen-20", "reproduce", "oven", { labels: ["failed:1"] })),
+    turn("", { exitCode: 128, signal: "SIGTERM" }),
+    shown(phase("kitchen-21", "kitchen-20", "reproduce", "oven", { status: "in_progress", labels: ["failed:1"] })),
+    commented("kitchen-21"),
+    updated(OVEN, "kitchen-21"),
+    released("oven", "kitchen-20"),
+  ]);
+
+  assert.equal(await k.run(), 0, k.err.join(""));
+
+  assert.deepEqual(k.bd().filter((argv) => argv[2] === "update" && !argv.includes("--claim")), [
+    [...OVEN, "update", "kitchen-21", "--assignee", "sona/oven", "--status", "open", "--json"],
+    [...OVEN, "update", "kitchen-20", "--status", "open", "--assignee", "", "--json"],
+  ]);
+  assert.ok(!k.bd().some((argv) => argv[2] === "gate" && argv[3] === "create"), "no pass");
+  const end = k.log().find((line) => line.step === "turn");
+  assert.deepEqual({ exit: end?.exit, outcome: end?.outcome, failures: end?.failures }, { exit: 128, outcome: "reclaimed", failures: undefined });
+});
+
+test("a phase another station holds by the turn's end (its lease reclaimed and taken elsewhere after a refused heartbeat) is left to that holder: no release, no restore, and the order likewise", async (t) => {
+  const k = kitchen(t, [
+    stations(station("kitchen-10", "oven")),
+    reclaimed(),
+    ready("oven", phase("kitchen-21", "kitchen-20", "reproduce", "oven")),
+    held(),
+    running("oven"),
+    claimed("oven", "kitchen-20"),
+    claimed("oven", "kitchen-21"),
+    heartbeat("oven", "kitchen-21", { stdout: "", stderr: "Error: kitchen-21 is claimed by sona/mac\n", exitCode: 1 }),
+    turn("stopped early\n", { lasts: 1.5 * MINUTE }),
+    shown(phase("kitchen-21", "kitchen-20", "reproduce", "oven", { status: "in_progress", assignee: "sona/mac" })),
+    commented("kitchen-21"),
+    shown({ id: "kitchen-20", title: "Stale cookie", status: "in_progress", issue_type: "epic", assignee: "sona/mac" }),
+  ]);
+
+  assert.equal(await k.run(), 0, k.err.join(""));
+
+  assert.ok(!k.bd().some((argv) => argv[2] === "update" && !argv.includes("--claim")), "nothing of another holder's is written");
+  const end = k.log().find((line) => line.step === "turn" && line.outcome);
+  assert.deepEqual({ outcome: end?.outcome, failures: end?.failures }, { outcome: "reclaimed", failures: undefined });
+});
+
+test("an ending whose bd call is refused is logged as failed and the service goes on: the phase and its take are bd reclaim's once their leases go stale", async (t) => {
+  const k = kitchen(t, [
+    ...oneTurn(phase("kitchen-21", "kitchen-20", "reproduce", "oven")),
+    turn("kitchen-21 closed\n"),
+    { command: "bd", args: [...EXPEDITOR, "show", "kitchen-21"], stdout: "", stderr: "Error: dial tcp 127.0.0.1:3307: connection refused\n", exitCode: 1 },
+    released("oven", "kitchen-20"),
+  ]);
+
+  assert.equal(await k.run(), 0, k.err.join(""));
+
+  const end = k.log().find((line) => line.step === "turn" && line.failed);
+  assert.match(String(end?.failed), /show kitchen-21 --json failed \(exit 1\): Error: dial tcp/);
+  assert.deepEqual(k.bd().at(-1), [...OVEN, "update", "kitchen-20", "--status", "open", "--assignee", "", "--json"], "the take is still released on the way out");
+  assert.equal(k.out.at(-1), "Tick 1: laid 0, started 1, waiting 0, ended 1\n");
+});
+
 test("a turn that closes its order with the result line leaves the order closed: the take is not released, since the release would open it again", async (t) => {
   const k = kitchen(t, [
     ...oneTurn(phase("kitchen-21", "kitchen-20", "merge", "oven")),
     turn("Order done: https://github.com/nomadec/kitchen/pull/7\n"),
-    commented("kitchen-21"),
     shown(phase("kitchen-21", "kitchen-20", "merge", "oven", { status: "closed" })),
+    commented("kitchen-21"),
     shown({ id: "kitchen-20", title: "Stale cookie", status: "closed", issue_type: "epic", close_reason: "Order done: https://github.com/nomadec/kitchen/pull/7" }),
   ]);
 
   assert.equal(await k.run(), 0, k.err.join(""));
 
-  assert.deepEqual(k.bd().slice(-2), [
+  assert.deepEqual(k.bd().slice(-3), [
     [...EXPEDITOR, "show", "kitchen-21", "--json"],
+    [...EXPEDITOR, "comments", "add", "kitchen-21", "Order done: https://github.com/nomadec/kitchen/pull/7", "--json"],
     [...EXPEDITOR, "show", "kitchen-20", "--json"],
   ]);
   assert.ok(!k.bd().some((argv) => argv.includes("kitchen-20") && argv.includes("--status")), "no write sets the closed order's status");
@@ -279,16 +336,15 @@ test("a budget overrun the harness reports counts as a failure even on a clean e
   const k = kitchen(t, [
     ...oneTurn(phase("kitchen-21", "kitchen-20", "reproduce", "oven")),
     turn("Working...\n", { stderr: "Budget limit reached ($5.02 of $5); stopping background agents.\n" }),
-    commented("kitchen-21"),
     shown(phase("kitchen-21", "kitchen-20", "reproduce", "oven", { status: "in_progress" })),
-    released("oven", "kitchen-21"),
-    updated(EXPEDITOR, "kitchen-21"),
+    commented("kitchen-21"),
+    updated(OVEN, "kitchen-21"),
     released("oven", "kitchen-20"),
   ]);
 
   assert.equal(await k.run(), 0, k.err.join(""));
 
-  assert.deepEqual(k.bd().at(-2), [...EXPEDITOR, "update", "kitchen-21", "--add-label", "failed:1", "--assignee", "sona/oven", "--json"]);
+  assert.deepEqual(k.bd().at(-3), [...OVEN, "update", "kitchen-21", "--add-label", "failed:1", "--assignee", "sona/oven", "--status", "open", "--json"]);
   const end = k.log().find((line) => line.step === "turn");
   assert.deepEqual({ exit: end?.exit, outcome: end?.outcome, failure: end?.failure }, { exit: 0, outcome: "failed", failure: "budget overrun reported by the harness" });
 });

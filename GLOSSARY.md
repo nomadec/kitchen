@@ -82,7 +82,7 @@ The sequence of phases one order walks through the graph. A path is read from th
 
 ## Class
 
-What an order currently is: a question, an idea, a proposal, a spec, a ticket or a bug. The turn that moves an order onto another path updates its class.
+What an order currently is: unsorted (from a source that sorts nothing), a question, an idea, a proposal, a spec, a ticket or a bug. The turn that moves an order onto another path updates its class.
 
 ## Turn driver
 

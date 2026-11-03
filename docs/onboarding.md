@@ -6,7 +6,7 @@ The space starts empty. Nothing is imported from Umka.
 
 ## The server
 
-`scripts/install-server.sh` sets up the server on rbn3, or on any Linux host that stands in for it. It installs Dolt and bd 1.3.1, creates the database, enables the custom bead types `phase`, `station` and `source` and the events journal through beads' config, runs Dolt as the `kitchen-dolt` systemd service bound to the Tailscale interface, and creates one SQL user per person listed in a file.
+`scripts/install-server.sh` sets up the server on rbn3, or on any Linux host that stands in for it. It installs Dolt 2.6.2 and bd 1.3.1, both pinned releases (the Dolt archive is checked against its recorded sha256 before it is unpacked), creates the database, enables the custom bead types `phase`, `station` and `source` and the events journal through beads' config, runs Dolt as the `kitchen-dolt` systemd service bound to the Tailscale interface, and creates one SQL user per person listed in a file.
 
 ```sh
 # people: one name per line, # starts a comment

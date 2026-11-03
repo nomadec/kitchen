@@ -73,6 +73,6 @@ test("a fake runner row that lasts answers once that long has passed on the cloc
   const killed = runner(["claude", "--print"], { signal: killer.signal });
   await clock.sleep(10_000);
   killer.abort();
-  assert.deepEqual(await killed, { stdout: "", stderr: "", exitCode: 128 });
+  assert.deepEqual(await killed, { stdout: "", stderr: "", exitCode: 128, signal: "SIGTERM" });
   assert.equal(clock.now().toISOString(), "2026-11-03T09:01:40.000Z", "the killed child's wake was forgotten, not slept out");
 });

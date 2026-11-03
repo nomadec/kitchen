@@ -15,13 +15,14 @@ const EXPEDITOR = ["--actor", "sona/expeditor"];
 const DESK = ["--actor", "sona/desk"];
 const PROMPT = (phase: string) => `Invoke the Skill tool with skill "kitchen:turn" and args "${phase}"`;
 
-/** Beneath every table: the order read back after a closed phase is still open (the session closed the phase, not the order), and the phase read back after the session is closed. The failed-turn test scripts an open phase. */
+/** Beneath every table: the order read before the take is open and held by no one; read back after a closed phase it is still held by this station (the session closed the phase, not the order); the phase read back after the session is closed. The failed-turn test scripts an open phase. */
+const ORDER_OPEN_BEFORE: ScriptedAnswer = { command: "bd", args: [...OWNER, "show", "kitchen-20"], stdout: '[{"id":"kitchen-20","status":"open","issue_type":"epic","labels":["loop"]}]' };
 const ORDER_OPEN_AFTER: ScriptedAnswer = { command: "bd", args: [...EXPEDITOR, "show", "kitchen-20"], stdout: '[{"id":"kitchen-20","status":"in_progress","issue_type":"epic","assignee":"sona/desk"}]' };
 const CLOSED_AFTER: ScriptedAnswer = { command: "bd", args: [...EXPEDITOR, "show"], stdout: '[{"id":"kitchen-21","status":"closed","issue_type":"task"}]' };
 
 function kitchen(t: { after(fn: () => void): void }, table: readonly ScriptedAnswer[], options: HostOptions = {}) {
   // Added to the test's own array, which the fake runner reads at call time, so rows a test pushes after this still count.
-  if (!table.includes(CLOSED_AFTER)) (table as ScriptedAnswer[]).push(ORDER_OPEN_AFTER, CLOSED_AFTER);
+  if (!table.includes(CLOSED_AFTER)) (table as ScriptedAnswer[]).push(ORDER_OPEN_BEFORE, ORDER_OPEN_AFTER, CLOSED_AFTER);
   const host = initialisedHost(t, table, options);
   const run = (...argv: string[]) => main(["turn", ...argv], host.deps);
   /** Every bd call's argv after `bd`, actor included. */
@@ -133,14 +134,13 @@ test("the terminal has the session's output, so the result line is its exit; a c
   assert.match(k.out.at(-1) ?? "", /^Turn ended: exit 0\n$/);
 });
 
-test("a session that exits non-zero leaving its phase open is a failed turn: through the shared handling the phase is released by the station and restored by the expeditor with failed:1, the order is released, and kitchen turn exits with the session's code", async (t) => {
+test("a session that exits non-zero leaving its phase open is a failed turn: through the shared handling the station sets the phase open again, still its own, with failed:1 in one write, the order is released, and kitchen turn exits with the session's code", async (t) => {
   const k = kitchen(t, [
     ...ONE_TURN.slice(0, 5),
     session("", 3),
     commented("kitchen-21"),
-    { command: "bd", args: [...EXPEDITOR, "show", "kitchen-21"], stdout: JSON.stringify([{ id: "kitchen-21", title: "grill: Stale cookie", status: "in_progress", issue_type: "task", labels: ["phase:grill", "station:sona/desk"] }]) },
-    released("kitchen-21"),
-    { command: "bd", args: [...EXPEDITOR, "update", "kitchen-21"], stdout: "[]" },
+    { command: "bd", args: [...EXPEDITOR, "show", "kitchen-21"], stdout: JSON.stringify([{ id: "kitchen-21", title: "grill: Stale cookie", status: "in_progress", issue_type: "task", assignee: "sona/desk", labels: ["phase:grill", "station:sona/desk"] }]) },
+    { command: "bd", args: [...DESK, "update", "kitchen-21"], stdout: "[]" },
     released("kitchen-20"),
   ]);
 
@@ -148,11 +148,38 @@ test("a session that exits non-zero leaving its phase open is a failed turn: thr
 
   assert.deepEqual(k.writes().slice(2), [
     [...EXPEDITOR, "comments", "add", "kitchen-21", "exit 3", "--json"],
-    [...DESK, "update", "kitchen-21", "--status", "open", "--assignee", "", "--json"],
-    [...EXPEDITOR, "update", "kitchen-21", "--add-label", "failed:1", "--assignee", "sona/desk", "--json"],
+    [...DESK, "update", "kitchen-21", "--add-label", "failed:1", "--assignee", "sona/desk", "--status", "open", "--json"],
     [...DESK, "update", "kitchen-20", "--status", "open", "--assignee", "", "--json"],
   ]);
   assert.match(k.err.at(-1) ?? "", /kitchen turn: exit 3: kitchen-21 is a failed turn, failed:1 \(exit 3\)/);
+});
+
+test("the result line of an attended turn comes from the result: note the driver writes, since the terminal has the session's output", async (t) => {
+  const k = kitchen(t, [
+    ...ONE_TURN.slice(0, 6),
+    { command: "bd", args: [...EXPEDITOR, "show", "kitchen-21"], stdout: JSON.stringify([{ id: "kitchen-21", title: "grill: Stale cookie", status: "closed", issue_type: "task", notes: "model: claude-opus-5\nresult: kitchen-21 closed: a proposal at docs/proposals/venue.md" }]) },
+    commented("kitchen-21"),
+    released("kitchen-20"),
+  ]);
+
+  assert.equal(await k.run("kitchen-21"), 0, k.err.join(""));
+
+  assert.deepEqual(k.writes()[2], [...EXPEDITOR, "comments", "add", "kitchen-21", "kitchen-21 closed: a proposal at docs/proposals/venue.md", "--json"]);
+  assert.match(k.out.at(-1) ?? "", /^Turn ended: kitchen-21 closed: a proposal at docs\/proposals\/venue\.md\n$/);
+});
+
+test("a second ready phase of an order this station's turn holds is refused before the take: one turn per order, held in the space", async (t) => {
+  const k = kitchen(t, [
+    shown(phase("kitchen-22", "kitchen-20", "sona/desk")),
+    stations(station("kitchen-10", "sona/desk")),
+    { command: "bd", args: [...OWNER, "show", "kitchen-20"], stdout: '[{"id":"kitchen-20","status":"in_progress","issue_type":"epic","assignee":"sona/desk","labels":["loop"]}]' },
+  ]);
+
+  assert.equal(await k.run("kitchen-22"), 1);
+
+  assert.match(k.err.at(-1) ?? "", /kitchen turn: order kitchen-20 is held by a turn at sona\/desk: its turn must end first/);
+  assert.equal(k.writes().length, 0);
+  assert.equal(k.claude().length, 0);
 });
 
 test("an order naming a repository the station offers gets its worktree between the take and the claim, and the session runs in it", async (t) => {
@@ -180,7 +207,7 @@ test("an order naming a repository the station offers gets its worktree between 
   assert.equal(await k.run("kitchen-21"), 0, k.err.join(""));
 
   const sequence = k.runner.calls.map((c) => (c.argv[0] === "git" ? `git ${c.argv[3]}` : c.argv[0] === "claude" ? "claude" : c.argv[3] === "update" ? `update ${c.argv[4]}` : c.argv[3]));
-  assert.deepEqual(sequence.slice(3), ["update kitchen-20", "git fetch", "git rev-parse", "git rev-parse", "git worktree", "git config", "git config", "git config", "git config", "update kitchen-21", "claude", "comments", "show", "show", "update kitchen-20"]);
+  assert.deepEqual(sequence.slice(4), ["update kitchen-20", "git fetch", "git rev-parse", "git rev-parse", "git worktree", "git config", "git config", "git config", "git config", "update kitchen-21", "claude", "show", "comments", "show", "update kitchen-20"]);
   assert.equal(k.claude()[0]?.cwd, worktree);
   assert.equal(k.claude()[0]?.stdio, "inherit");
 });

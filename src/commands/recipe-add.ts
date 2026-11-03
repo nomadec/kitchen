@@ -9,6 +9,7 @@ import type { Bundle } from "../recipe/bundle.ts";
 import { describeFinding, lintBundle } from "../recipe/lint.ts";
 import type { RegisteredPhase } from "../recipe/lint.ts";
 import { parsePhaseFile, PhaseError, phaseTitle, slugOf, splitTitle } from "../recipe/phase.ts";
+import { SUPERSEDED } from "../registered.ts";
 import { openSpace, RefusedError } from "../space.ts";
 import type { Bead } from "../space.ts";
 
@@ -23,8 +24,6 @@ phases are untouched.
 Options:
   --recipe <name>   The recipe name; required for a file or a URL (a plugin names itself)
 `;
-
-const SUPERSEDED = "superseded";
 
 export const recipeAdd: Command = async (args, deps) => {
   const refuse = (message: string): number => {

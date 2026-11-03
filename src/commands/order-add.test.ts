@@ -217,7 +217,7 @@ test("free text is an idea: the sentence is the title, the description and the r
   assert.equal(order[order.indexOf("--description") + 1], "Let a venue be booked");
 });
 
-test("no qualifying station: the order is created, no phase bead is laid, and a pass titled no station for <phase>, the owner's and the order's child, names the gap", async (t) => {
+test("no qualifying station: the order is created, the entry phase is laid unassigned with no station: label, and a pass titled no station for <phase>, the owner's and the order's child, blocks the phase and names the gap", async (t) => {
   const k = kitchen(t, [
     issueView(["bug"]), ...noDuplicate, UMKA,
     stations(
@@ -225,6 +225,7 @@ test("no qualifying station: the order is created, no phase bead is laid, and a 
       station("kitchen-11", "pantry", ["claude-opus-5"], ["sona-is/sona"]),
     ),
     ORDER,
+    created("kitchen-21", "reproduce: Stale cookie shows a blank page", "task", "reproduce: Stale cookie shows a blank page"),
     { command: "bd", args: ["--actor", "sona", "gate", "create"], stdout: '{"id":"kitchen-30","title":"no station for reproduce","status":"open","issue_type":"gate","await_type":"human"}' },
     { command: "bd", args: ["--actor", "sona", "update", "kitchen-30"], stdout: "{}" },
   ]);
@@ -235,10 +236,19 @@ test("no qualifying station: the order is created, no phase bead is laid, and a 
   const gap = "reproduce needs model claude-opus-5 and nomadec/kitchen checked out; sona/grill lacks model claude-opus-5; sona/pantry lacks nomadec/kitchen";
   assert.deepEqual(k.bd().slice(4), [
     ["create", "Stale cookie shows a blank page", "--type", "epic", "--labels", "loop", "--notes", "repos: nomadec/kitchen\nrecipe: umka rev:a1b2c3d\nclass: bug", "--description", "Logging in with a stale cookie shows a blank page.\n", "--external-ref", ISSUE, "--json"],
-    ["gate", "create", "--type", "human", "--blocks", "kitchen-20", "--title", "no station for reproduce", "--reason", gap, "--json"],
+    [
+      "create", "reproduce: Stale cookie shows a blank page",
+      "--type", "task",
+      "--parent", "kitchen-20", "--no-inherit-labels",
+      "--labels", "phase:reproduce",
+      "--notes", "model: claude-opus-5\nentry: mechanical",
+      "--description", PHASE("reproduce", "bug"),
+      "--json",
+    ],
+    ["gate", "create", "--type", "human", "--blocks", "kitchen-21", "--title", "no station for reproduce", "--reason", gap, "--json"],
     ["update", "kitchen-30", "--parent", "kitchen-20", "--assignee", "sona", "--json"],
   ]);
-  assert.match(k.out.join(""), /No station for reproduce: laid pass kitchen-30 \(reproduce needs model claude-opus-5/);
+  assert.match(k.out.join(""), /No station for reproduce: laid kitchen-21 unassigned behind pass kitchen-30 \(reproduce needs model claude-opus-5/);
 });
 
 test("among three qualifying stations the unattended ones come first, then the fewest running turns", async (t) => {

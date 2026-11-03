@@ -3,6 +3,7 @@
 // told to stop; --once runs one tick and waits for the turns it started, for a check by hand or a test.
 // The foreground process also runs bd serve behind a token file and serves the UI beside it (story 69).
 import fs from "node:fs";
+import net from "node:net";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import type { CliDeps, Command } from "../cli.ts";
@@ -26,7 +27,8 @@ a token file it generates (docs/ui.md).
 
 Options:
   --interval <seconds>   Seconds between ticks (default: ${DEFAULT_INTERVAL})
-  --port <port>          The loopback port of the UI; bd serve takes the next one (default: ${DEFAULT_PORT})
+  --port <port>          The loopback port of the UI; bd serve takes the next one (default: ${DEFAULT_PORT});
+                         0 gives both an ephemeral port, for a check by hand
   --foreground           Run the expeditor in this process instead of installing the service
   --once                 With --foreground: one tick, then wait for the turns it started, then exit;
                          no UI and no bd serve are started for it
@@ -112,8 +114,8 @@ async function foreground(deps: CliDeps, config: HostConfig, interval: number, p
 /** Starts bd serve and the UI server, logs where they listen, and reports a bd serve that ends on its own. */
 async function serve(deps: CliDeps, config: HostConfig, log: Log, port: number): Promise<{ stop(): Promise<void> }> {
   // bd serve needs a fixed port (an ephemeral one is only printed on its stdout): the one after the UI's,
-  // and the default's successor when the UI takes an ephemeral port.
-  const api = startServe({ runner: deps.runner, env: deps.env, config }, (port === 0 ? DEFAULT_PORT : port) + 1);
+  // and a free one of this host's choosing when the UI takes an ephemeral port, so two runs by hand do not collide.
+  const api = startServe({ runner: deps.runner, env: deps.env, config }, port === 0 ? await freePort() : port + 1);
   let stopped = false;
   void api.done.then((result) => {
     if (!stopped) log.write({ step: "serve", ended: `bd serve exited ${result.exitCode}`, stderr: result.stderr.trim() });
@@ -128,6 +130,19 @@ async function serve(deps: CliDeps, config: HostConfig, log: Log, port: number):
       log.write({ step: "serve", stopped: true });
     },
   };
+}
+
+/** A loopback port nothing listens on now: bound to 0 and released, for bd serve to take next. */
+function freePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const probe = net.createServer();
+    probe.once("error", reject);
+    probe.listen(0, "127.0.0.1", () => {
+      const address = probe.address();
+      const port = typeof address === "object" && address !== null ? address.port : 0;
+      probe.close(() => resolve(port));
+    });
+  });
 }
 
 function parseOptions(args: readonly string[]) {

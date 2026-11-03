@@ -2,8 +2,12 @@
 // spawns the claude CLI in the Claude Code harness with the Kitchen plugin and the station's plugins,
 // the turn driver as the prompt, the order's worktree (else the station's checkout) as the working
 // directory, the actor and the space connection in the environment, and the harness flags for model, effort and (headless only)
-// the print flag and the dollar cap. A Codex runner would be a second implementation of TurnRunner.
-import { beadsDir } from "../config.ts";
+// the print flag and the dollar cap. The secrets the launch spec names are resolved on this host into
+// the child's environment, from the expeditor's own environment or the host's secret files, and never
+// read into the space. A Codex runner would be a second implementation of TurnRunner.
+import fs from "node:fs";
+import path from "node:path";
+import { beadsDir, kitchenConfigDir } from "../config.ts";
 import type { HostConfig } from "../config.ts";
 import type { LaidPhase } from "../laid.ts";
 import type { Order } from "../order.ts";
@@ -35,7 +39,40 @@ export interface TurnHandle {
   kill(): void;
 }
 
+/** A runner spawns the child, or throws this before any spawn when the launch cannot be made: a secret the host does not hold. */
 export type TurnRunner = (request: TurnRequest) => TurnHandle;
+
+export class LaunchError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "LaunchError";
+  }
+}
+
+/** Where a host keeps a secret by name when it is not in the environment: one file per name, the value its content. */
+export function secretFile(env: Record<string, string | undefined>, name: string): string {
+  return path.join(kitchenConfigDir(env), "secrets", name);
+}
+
+/**
+ * The value of each secret the launch spec names, from the environment first, then the host's secret
+ * file; a name resolved nowhere refuses the launch, naming the file that would hold it.
+ */
+export function resolveSecrets(env: Record<string, string | undefined>, names: readonly string[]): Record<string, string> {
+  const resolved: Record<string, string> = {};
+  for (const name of names) {
+    const fromEnv = env[name];
+    if (fromEnv !== undefined && fromEnv !== "") {
+      resolved[name] = fromEnv;
+      continue;
+    }
+    const file = secretFile(env, name);
+    const fromFile = fs.existsSync(file) ? fs.readFileSync(file, "utf8").replace(/\r?\n$/, "") : "";
+    if (fromFile === "") throw new LaunchError(`secret ${name} is not set: the station names it, and this host holds it neither in the environment nor at ${file}`);
+    resolved[name] = fromFile;
+  }
+  return resolved;
+}
 
 export interface ClaudeRunnerDeps {
   runner: CommandRunner;
@@ -55,6 +92,7 @@ export function claudeRunner(deps: ClaudeRunnerDeps): TurnRunner {
     const argv = claudeArgv(deps.pluginDir, request);
     const cwd = workingDirectory(request);
     const env = {
+      ...resolveSecrets(deps.env, request.launch.secrets),
       // The station title is the turn actor (spec: Store, Actors).
       BEADS_ACTOR: request.phase.station,
       BEADS_DIR: beadsDir(deps.env),
@@ -74,8 +112,9 @@ export function claudeRunner(deps: ClaudeRunnerDeps): TurnRunner {
 
 function claudeArgv(pluginDir: string, { launch, phase, mode }: TurnRequest): string[] {
   const plugins = [pluginDir, ...launch.plugins].flatMap((dir) => ["--plugin-dir", dir]);
-  // A headless session has no one to answer a permission prompt, so it runs with permissions skipped;
-  // guard hooks that block risky actions are out of v1's scope. An interactive session asks the human.
+  // A headless session has no one to answer a permission prompt, so it runs with permissions skipped
+  // (docs/trust-model.md says what that widens); guard hooks that block risky actions are out of v1's
+  // scope. An interactive session asks the human.
   const headless = mode === "headless" ? ["--print", "--effort", phase.budget.effort, "--max-budget-usd", String(phase.budget.usd), "--dangerously-skip-permissions"] : ["--effort", phase.budget.effort];
   return ["claude", "--model", phase.model, ...plugins, ...headless, turnPrompt(phase.id)];
 }

@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { main } from "../cli.ts";
+import { FORWARDED_HOOKS } from "./worktree.ts";
 import { initialisedHost } from "../testing/index.ts";
 import type { ScriptedAnswer } from "../testing/index.ts";
 
@@ -128,19 +129,54 @@ test("the remote kitchen/<order> branch, when it exists, is checked out as the w
   assert.equal(k.claude()[0]?.cwd, worktree);
 });
 
-test("the trailer hook is written under the checkout, executable, running the repository's own hook and then adding Kitchen-Station from the worktree's config", async (t) => {
+test("the hooks directory is written under the checkout with every client-side hook, each executable and forwarding to the repository's own hook of that name; prepare-commit-msg then adds Kitchen-Station from the worktree's config", async (t) => {
   const k = kitchen(t, (c) => [...oneTurn(c, "nomadec/kitchen"), ...fresh(c.kitchen, "kitchen-20")]);
 
   assert.equal(await k.run(), 0, k.err.join(""));
 
-  const hook = path.join(k.checkouts.kitchen, ".kitchen", "hooks", "prepare-commit-msg");
-  assert.ok(fs.existsSync(hook), `${hook} exists`);
-  assert.ok(fs.statSync(hook).mode & 0o100, "executable by its owner");
-  const text = fs.readFileSync(hook, "utf8");
-  assert.match(text, /^#!\/bin\/sh\n/);
-  assert.match(text, /"\$hooks\/prepare-commit-msg" "\$@"/);
+  const dir = path.join(k.checkouts.kitchen, ".kitchen", "hooks");
+  assert.deepEqual(fs.readdirSync(dir).sort(), [...FORWARDED_HOOKS].sort());
+  for (const name of ["pre-commit", "commit-msg", "pre-push"]) {
+    const hook = path.join(dir, name);
+    assert.ok(fs.statSync(hook).mode & 0o100, `${name} is executable by its owner`);
+    const text = fs.readFileSync(hook, "utf8");
+    assert.match(text, /^#!\/bin\/sh\n/);
+    assert.match(text, /git config --file "\$common\/config" core\.hooksPath .* echo "\$common\/hooks"/, "the repository's own hooks directory, its core.hooksPath first");
+    assert.match(text, /"\$hooks\/\$name" "\$@" \|\| exit \$\?/, "the repository's hook of the same name runs, and its refusal is the worktree's");
+    assert.doesNotMatch(text, /interpret-trailers/);
+  }
+  const text = fs.readFileSync(path.join(dir, "prepare-commit-msg"), "utf8");
+  assert.match(text, /"\$hooks\/\$name" "\$@"/);
   assert.match(text, /git config kitchen\.station/);
   assert.match(text, /interpret-trailers .*--trailer "Kitchen-Station: \$station"/);
+});
+
+test("one order whose cleanup fails (its bead gone, or git refusing the removal) is logged under the worktrees step and the tick goes on: the other orders are cleaned and the ready phases dispatched", async (t) => {
+  const k = kitchen(t, (c) => [
+    { command: "bd", args: [...EXPEDITOR, "list", "--type", "station"], stdout: JSON.stringify([station(c)]) },
+    { command: "bd", args: [...EXPEDITOR, "show", "kitchen-20"], stdout: "", stderr: "Error: issue not found: kitchen-20\n", exitCode: 1 },
+    { command: "bd", args: [...EXPEDITOR, "show", "kitchen-30"], stdout: JSON.stringify([order("kitchen-30", "nomadec/kitchen", "closed")]) },
+    { command: "git", args: ["-C", c.kitchen, "worktree", "remove"], stderr: "fatal: cannot remove a locked working tree\n", exitCode: 128, once: true },
+    { command: "bd", args: [...EXPEDITOR, "show", "kitchen-40"], stdout: JSON.stringify([order("kitchen-40", "nomadec/kitchen", "closed")]) },
+    { command: "git", args: ["-C", c.kitchen, "worktree", "remove"] },
+    { command: "git", args: ["-C", c.kitchen, "branch", "-D"] },
+    { command: "bd", args: [...EXPEDITOR, "ready", "--assignee", "sona/oven"], stdout: "[]" },
+    { command: "bd", args: [...EXPEDITOR, "list", "--type", "epic", "--label", "loop", "--status", "in_progress"], stdout: "[]" },
+    { command: "bd", args: [...EXPEDITOR, "list", "--assignee", "sona/oven", "--status", "in_progress"], stdout: "[]" },
+  ]);
+  for (const id of ["kitchen-20", "kitchen-30", "kitchen-40"]) fs.mkdirSync(path.join(k.checkouts.kitchen, ".kitchen", "worktrees", id), { recursive: true });
+
+  assert.equal(await k.run(), 0, k.err.join(""));
+
+  const failed = k.log().filter((l) => l.step === "worktrees" && l.failed).map((l) => [String(l.order), String(l.failed)]);
+  assert.equal(failed.length, 2);
+  assert.deepEqual(failed[0]?.[0], "kitchen-20");
+  assert.match(failed[0]?.[1] ?? "", /show kitchen-20 --json failed \(exit 1\): Error: issue not found/);
+  assert.deepEqual(failed[1]?.[0], "kitchen-30");
+  assert.match(failed[1]?.[1] ?? "", /worktree remove --force \S+ failed \(exit 128\): fatal: cannot remove a locked working tree/);
+  const line = k.log().find((l) => l.step === "worktrees" && l.removed);
+  assert.deepEqual(line?.removed, [path.join(k.checkouts.kitchen, ".kitchen", "worktrees", "kitchen-40")]);
+  assert.ok(k.log().some((l) => l.step === "dispatch"), "the tick ran to its end");
 });
 
 test("an order naming two repositories gets two worktrees, each under its station checkout, and claude runs in the first repository's", async (t) => {

@@ -11,6 +11,7 @@ import type { Command } from "../cli.ts";
 import type { HostConfig } from "../config.ts";
 import { claudeRunner } from "../expeditor/claude.ts";
 import { endTurn, startTurn } from "../expeditor/turn.ts";
+import { parseActor } from "../actor.ts";
 import { parseLaidPhase, LaidPhaseError } from "../laid.ts";
 import type { LaidPhase } from "../laid.ts";
 import { readStations } from "../registered.ts";
@@ -117,6 +118,12 @@ async function readWaiting(space: Space, config: Pick<HostConfig, "owner" | "hos
   if (!station.attended) throw new Refusal(`${phase.id} is assigned to ${station.title}, an unattended station: the expeditor starts its turns`);
   if (bead.status === "closed") throw new Refusal(`${phase.id} is closed`);
   if (bead.status === "in_progress") throw new Refusal(`${phase.id} is held by a turn at ${phase.station}`);
+  // One turn per order, held in the space (story 49): the take is idempotent for the same station, so
+  // a second phase of an order this station's turn holds is refused here, before the take.
+  const order = await space.show(phase.order);
+  if (order.status === "in_progress" && typeof order.assignee === "string" && parseActor(order.assignee).kind === "station") {
+    throw new Refusal(`order ${phase.order} is held by a turn at ${order.assignee}: its turn must end first`);
+  }
   const ready = await space.ready({ assignee: station.title });
   if (!ready.some((b) => b.id === phase.id)) throw new Refusal(`${phase.id} is not ready: blocked by an open pass or dependency`);
   return { phase, station };

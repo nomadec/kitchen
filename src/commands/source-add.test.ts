@@ -19,7 +19,7 @@ const CREATED = (id: string, title: string): ScriptedAnswer => ({
   stdout: `{"id":"${id}","title":"${title}","status":"open","issue_type":"source"}`,
 });
 
-test("a GitHub source is registered with an empty cursor, the registering host and the default class unsorted", async (t) => {
+test("a GitHub source is registered with the registration instant as its cursor, so the issues already in the tracker become no orders, the registering host and the default class unsorted", async (t) => {
   const k = kitchen(t, [CREATED("kitchen-20", "github:nomadec/kitchen")]);
 
   const code = await k.run("--kind", "github", "--target", "nomadec/kitchen", "--recipe", "umka");
@@ -31,13 +31,27 @@ test("a GitHub source is registered with an empty cursor, the registering host a
         "bd", "--actor", "sona", "create", "github:nomadec/kitchen",
         "--type", "source",
         "--labels", "owner:sona,host:sona-laptop,kind:github",
-        "--notes", "target: nomadec/kitchen\nrecipe: umka\nclass: unsorted\ncursor:",
+        "--notes", "target: nomadec/kitchen\nrecipe: umka\nclass: unsorted\ncursor: 2026-01-01T00:00:00Z",
         "--json",
       ],
       ...k.connection,
     },
   ]);
   assert.match(k.out.join(""), /Registered source github:nomadec\/kitchen as kitchen-20, polled by sona-laptop/);
+});
+
+test("--since moves a GitHub source's first poll back to that instant; it is refused on a file source, which starts at its first line, and when it is not an instant", async (t) => {
+  const k = kitchen(t, [CREATED("kitchen-20", "github:nomadec/kitchen")]);
+
+  assert.equal(await k.run("--kind", "github", "--target", "nomadec/kitchen", "--recipe", "umka", "--since", "2025-12-01T00:00:00Z"), 0, k.err.join(""));
+  const argv = k.runner.calls[0]?.argv ?? [];
+  assert.equal(argv[argv.indexOf("--notes") + 1], "target: nomadec/kitchen\nrecipe: umka\nclass: unsorted\ncursor: 2025-12-01T00:00:00Z");
+
+  assert.notEqual(await k.run("--kind", "file", "--target", "/home/sona/intake.jsonl", "--recipe", "umka", "--since", "2025-12-01T00:00:00Z"), 0);
+  assert.match(k.err.at(-1) ?? "", /--since goes with --kind github/);
+  assert.notEqual(await k.run("--kind", "github", "--target", "nomadec/kitchen", "--recipe", "umka", "--since", "yesterday"), 0);
+  assert.match(k.err.at(-1) ?? "", /--since must be an instant such as 2026-01-02T10:00:00Z, got yesterday/);
+  assert.equal(k.runner.calls.length, 1);
 });
 
 test("a file source takes a JSONL path, a class, and --host names another host to poll it", async (t) => {

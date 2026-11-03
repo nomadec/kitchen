@@ -24,6 +24,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
+import { KITCHEN_LAID } from "../src/expeditor/answers.ts";
+import type { Bead as KitchenBead } from "../src/space.ts";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const KITCHEN = path.join(ROOT, "dist", "bin", "kitchen.js");
@@ -55,16 +57,9 @@ interface Check {
 /** A check that cannot run on this host for a reason outside Kitchen: recorded BLOCKED, not FAIL. */
 class Blocked extends Error {}
 
-/** A bead as bd --json prints it; only the fields the checks read are named. */
-interface Bead {
-  id: string;
-  title: string;
-  status: string;
-  issue_type: string;
-  await_type?: string;
-  labels?: string[] | null;
-  notes?: string;
-  description?: string;
+/** A bead as bd --json prints it, with the fields beyond Kitchen's own that the checks read. */
+interface Bead extends KitchenBead {
+  labels?: string[];
   assignee?: string | null;
   created_by?: string;
   closed_by?: string;
@@ -275,7 +270,7 @@ const capture = (text: string, pattern: RegExp, what: string): string => {
 };
 
 /** The three passes Kitchen itself lays, by title; the recipe's pass is any other human gate. */
-const kitchenLaid = (bead: Bead): boolean => bead.issue_type === "gate" && /^(no station for|rounds reached|turn failed)[ :]/.test(bead.title);
+const kitchenLaid = (bead: Bead): boolean => bead.issue_type === "gate" && KITCHEN_LAID.some((title) => bead.title.startsWith(`${title} `) || bead.title.startsWith(`${title}:`));
 const recipePass = (bead: Bead): boolean => bead.issue_type === "gate" && bead.await_type === "human" && !kitchenLaid(bead);
 
 say(`Kitchen smoke ${stamp}`);

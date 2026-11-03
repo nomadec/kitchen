@@ -3,12 +3,16 @@
 // reached: <phase>`, `turn failed: <phase>`) carry none, so the expeditor applies their word on tick:
 // `retry` reopens the phase behind the pass with its failure count cleared, `retry <station title>`
 // moves it to that station as well, `stop` closes the order with the word, and any other word leaves
-// the pass closed and the order open with a note saying the human continues by hand. The pass is
-// labelled `applied` afterwards, so a restart or a repeated tick applies nothing twice.
+// the pass closed and the order open with a note saying the human continues by hand. A phase laid
+// unassigned behind a `no station for` pass is assigned on `retry` by intake's mechanical choice
+// again, among the owner's stations as they are now; still none, and a new pass names the gap. The
+// pass is labelled `applied` afterwards, so a restart or a repeated tick applies nothing twice.
 import { parseActor } from "../actor.ts";
-import { labelValue } from "../fields.ts";
-import { NO_STATION } from "../intake.ts";
+import { labelValue, noteLine } from "../fields.ts";
+import { chooseStation, describeGap, layNoStationPass, NO_STATION } from "../intake.ts";
 import { FAILED, failures } from "../laid.ts";
+import { parseOrder } from "../order.ts";
+import { readStations } from "../registered.ts";
 import type { Bead, BeadRef, Space, UpdateFields } from "../space.ts";
 import { TURN_FAILED } from "./turn.ts";
 
@@ -57,8 +61,10 @@ export interface Applied {
   order?: string;
   /** The phases reopened by `retry`. */
   phases?: string[];
-  /** The station `retry <station title>` moved them to. */
+  /** The station `retry <station title>` moved them to, or the one the mechanical choice assigned an unassigned phase to. */
   station?: string;
+  /** The `no station for` pass laid again when `retry` found no station for an unassigned phase. */
+  relaid?: string;
   /** The beads `stop` closed: the order's open phases, then the order. */
   closed?: string[];
 }
@@ -78,10 +84,11 @@ export async function applyWord(space: Space, pass: Bead, owner: string): Promis
     done.phases = [];
     if (word.station !== undefined) done.station = word.station;
     for (const phase of phases) {
-      await space.update(phase, retried(phase, word.station));
+      const station = word.station ?? (assigned(phase) ? undefined : await chooseAgain(space, phase, order, owner, done));
+      if (station === undefined && !assigned(phase)) continue;
+      await space.update(phase, retried(phase, station));
       done.phases.push(phase.id);
     }
-    // The `no station for` pass blocks its order and no phase was laid behind it: nothing to reopen.
     if (!phases.length) await byHand("but no phase is laid behind the pass");
   } else if (word.kind === "stop") {
     done.closed = [];
@@ -103,6 +110,32 @@ export async function applyWord(space: Space, pass: Bead, owner: string): Promis
   return done;
 }
 
+/** Whether the phase is assigned to a station: one laid behind a `no station for` pass is not. */
+function assigned(phase: Bead): boolean {
+  return typeof phase.assignee === "string" && phase.assignee !== "";
+}
+
+/**
+ * Intake's mechanical choice, made again for a phase laid unassigned: the owner's stations as they
+ * are now, against the phase's model note and its order's repositories. None qualifying lays the
+ * `no station for` pass again behind the phase, with the gap as it is now, and answers nothing.
+ */
+async function chooseAgain(space: Space, phase: Bead, order: string | undefined, owner: string, done: Applied): Promise<string | undefined> {
+  const slug = labelValue(phase, "phase") ?? "";
+  const repos = order === undefined ? [] : parseOrder(await space.show(order)).repos;
+  const need = { model: noteLine(phase.notes ?? "", "model") || undefined, repos };
+  const stations = await readStations(space, { owner });
+  const chosen = await chooseStation(space, stations, need);
+  if (chosen) {
+    done.station = chosen.title;
+    return chosen.title;
+  }
+  const gap = describeGap(owner, { slug }, need, stations);
+  const relaid = await layNoStationPass(space, { order: order ?? (typeof phase.parent === "string" ? phase.parent : ""), phase: phase.id, slug, gap, owner });
+  done.relaid = relaid.id;
+  return undefined;
+}
+
 /** Open again with the failure count gone; moved to the station named, the `station:` label following so a reclaim restores it there. */
 function retried(phase: Bead, station: string | undefined): UpdateFields {
   const count = failures(phase);
@@ -112,7 +145,7 @@ function retried(phase: Bead, station: string | undefined): UpdateFields {
   return {
     ...fields,
     assignee: station,
-    addLabels: [`station:${station}`],
+    addLabels: from === station ? [] : [`station:${station}`],
     removeLabels: [...(fields.removeLabels ?? []), ...(from !== undefined && from !== station ? [`station:${from}`] : [])],
   };
 }

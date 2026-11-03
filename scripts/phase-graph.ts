@@ -12,6 +12,7 @@ import { pathToFileURL } from "node:url";
 import { resolveActor } from "../src/actor.ts";
 import { readHostConfig } from "../src/config.ts";
 import type { RegisteredPhase } from "../src/recipe/lint.ts";
+import { SUPERSEDED } from "../src/registered.ts";
 import { isPass, parsePhaseFile, PhaseError, phaseTitle, splitTitle } from "../src/recipe/phase.ts";
 import type { Edge } from "../src/recipe/phase.ts";
 import type { CommandRunner } from "../src/runner.ts";
@@ -34,7 +35,6 @@ interface ResolvedEdge {
 /** The revision label of each recipe's latest revision. */
 type Revisions = ReadonlyMap<string, string>;
 
-const SUPERSEDED = "superseded";
 
 /** Draws the graph to stdout; exit code 0, or 1 with the reason on stderr. */
 export async function phaseGraph(deps: GraphDeps): Promise<number> {

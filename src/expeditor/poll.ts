@@ -107,13 +107,14 @@ interface IssueRow {
 }
 
 /**
- * The issues of the target repository updated since the cursor, oldest update first, so the cursor
- * advances through them in order. `>=` rather than `>`: an issue updated in the same second as the
- * cursor is listed again rather than missed, and the duplicate check skips it.
+ * The open issues of the target repository updated since the cursor, oldest update first, so the
+ * cursor advances through them in order. Open only: a closed issue is no work, however it was
+ * updated. `>=` rather than `>`: an issue updated in the same second as the cursor is listed again
+ * rather than missed, and the duplicate check skips it.
  */
 async function issuesSince(runner: CommandRunner, source: Source): Promise<Polled[]> {
   const search = ["sort:updated-asc", ...(source.cursor ? [`updated:>=${source.cursor}`] : [])].join(" ");
-  const result = await runner(["gh", "issue", "list", "--repo", source.target, "--state", "all", "--limit", ISSUE_LIMIT, "--search", search, "--json", ISSUE_FIELDS]);
+  const result = await runner(["gh", "issue", "list", "--repo", source.target, "--state", "open", "--limit", ISSUE_LIMIT, "--search", search, "--json", ISSUE_FIELDS]);
   if (result.exitCode !== 0) throw new PollError(`gh issue list --repo ${source.target} failed: ${result.stderr.trim()}`);
   return (JSON.parse(result.stdout) as IssueRow[]).map((issue) => ({
     cursor: issue.updatedAt,
@@ -126,8 +127,9 @@ async function issuesSince(runner: CommandRunner, source: Source): Promise<Polle
 
 /**
  * The lines of the JSONL file after the cursor, a line offset counted from zero. Each line is a JSON
- * string holding an item as `kitchen order add` takes it, read when its turn comes; a blank line or
- * one holding anything else is no item and is passed over.
+ * string holding an item as `kitchen order add` takes it (`"https://github.com/o/r/issues/7"`,
+ * `"/path/to/idea.md"`, `"free text"`), read when its turn comes; a blank line or one holding
+ * anything else, a JSON object among them, is no item and is passed over, logged as dropped.
  */
 function linesSince(source: Source): Polled[] {
   const offset = source.cursor === "" ? 0 : Number(source.cursor);

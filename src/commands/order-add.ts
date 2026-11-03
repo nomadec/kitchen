@@ -79,7 +79,7 @@ export const orderAdd: Command = async (args, deps) => {
   deps.stdout(
     result.kind === "laid"
       ? `Laid ${result.slug} as ${result.phase.id} at ${result.station.title} (entry: mechanical)\n`
-      : `No station for ${result.slug}: laid pass ${result.pass.id} (${result.gap})\n`,
+      : `No station for ${result.slug}: laid ${result.phase.id} unassigned behind pass ${result.pass.id} (${result.gap})\n`,
   );
   return 0;
 };

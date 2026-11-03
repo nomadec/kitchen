@@ -100,6 +100,19 @@ test("a station is refused, before any bd call, when it closes a pass; closing i
   ]);
 });
 
+test("a station is refused the same way when it closes a pass through an update of its status, which is a close by another name", async () => {
+  const { space: s, runner } = space(stationActor("sona", "grill"), [{ command: "bd", args: ["--actor", "sona/grill", "update"], stdout: "[]" }]);
+  await assert.rejects(() => s.update(PASS, { status: "closed" }), /sona\/grill may not close the pass kitchen-1\.2/);
+  assert.equal(runner.calls.length, 0, "no call was issued for the refused close");
+
+  await s.update(PASS, { addLabels: ["briefed"] });
+  await s.update(PHASE_LAID, { status: "closed" });
+  assert.deepEqual(runner.calls.map((c) => c.argv), [
+    ["bd", "--actor", "sona/grill", "update", "kitchen-1.2", "--add-label", "briefed", "--json"],
+    ["bd", "--actor", "sona/grill", "update", "kitchen-1.1", "--status", "closed", "--json"],
+  ]);
+});
+
 test("the expeditor may keep a source's cursor but, like a station, may not close a pass", async () => {
   const { space: s, runner } = space(expeditorActor("sona"), [
     { command: "bd", args: ["--actor", "sona/expeditor", "show", "kitchen-9"], stdout: '[{"id":"kitchen-9","issue_type":"source","status":"open","notes":"cursor: 41"}]' },

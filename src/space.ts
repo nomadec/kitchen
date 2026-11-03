@@ -84,10 +84,6 @@ export interface BeadFilter {
   all?: boolean;
 }
 
-export type ReadyFilter = BeadFilter;
-/** The name the recipe slice gave the list filter; the same type. */
-export type ListFilter = BeadFilter;
-
 export interface GateFields {
   /** The bead the gate blocks: the phase laid behind a pass, or behind an external wait. */
   blocks: string;
@@ -97,6 +93,20 @@ export interface GateFields {
   reason?: string;
   awaitId?: string;
   timeout?: string;
+}
+
+/** A pass as Kitchen and a turn lay it: the gate itself, then the parent, the owner and any labels in a second write. */
+export interface PassFields {
+  /** The order the pass is a child of. */
+  order: string;
+  /** The bead the pass blocks: the phase behind it, or the order. */
+  blocks: string;
+  title: string;
+  /** The brief: what was done, what is asked, the choices. */
+  brief: string;
+  /** The person whose word closes it: the pass is assigned to them. */
+  owner: string;
+  labels?: readonly string[];
 }
 
 /** What one `bd gate check` did: the counts it prints, and the gates it closed as resolved. */
@@ -140,7 +150,7 @@ export interface Space {
   /** Makes `id` blocked by `blockedBy`. */
   addDependency(id: string, blockedBy: string): Promise<void>;
   /** Open beads with no active blocker, as `bd ready` lists them. */
-  ready(filter?: ReadyFilter): Promise<Bead[]>;
+  ready(filter?: BeadFilter): Promise<Bead[]>;
   /** Open beads matching the filter, as `bd list` prints them. */
   list(filter?: BeadFilter): Promise<Bead[]>;
   show(id: string): Promise<Bead>;
@@ -151,6 +161,8 @@ export interface Space {
   close(bead: BeadRef, reason: string): Promise<void>;
   /** Lays a gate bead that blocks another bead: a pass when its type is `human`. */
   layGate(fields: GateFields): Promise<Bead>;
+  /** Lays a pass: a human gate with the brief as its reason, made the order's child and assigned to its owner. */
+  layPass(fields: PassFields): Promise<Bead>;
   /** The open gate beads. */
   gates(): Promise<Bead[]>;
   /** Evaluates the typed gates (all of them, or one type) and closes those that resolved; nothing when none is open. */
@@ -230,6 +242,8 @@ export function openSpace(deps: SpaceDeps): Space {
 
   const update = async (bead: BeadRef, fields: UpdateFields): Promise<void> => {
     refuseRegistered("edit", bead.issue_type);
+    // A status of closed is a close: a pass is refused the same way as through close().
+    if (fields.status === "closed") await refusePassClose(bead);
     await bdJson<unknown>([
       "update", bead.id,
       ...flag("--title", fields.title),
@@ -319,6 +333,13 @@ export function openSpace(deps: SpaceDeps): Space {
         ...flag("--await-id", fields.awaitId),
         ...flag("--timeout", fields.timeout),
       ]),
+
+    layPass: async (fields) => {
+      const gate = await bdJson<Bead>(["gate", "create", "--type", "human", "--blocks", fields.blocks, ...flag("--title", fields.title), ...flag("--reason", fields.brief)]);
+      // bd gate create takes no parent, labels or assignee: a second call makes the pass the order's child, for the owner.
+      await update(gate, { parent: fields.order, ...(fields.labels?.length ? { addLabels: fields.labels } : {}), assignee: fields.owner });
+      return gate;
+    },
 
     gates: () => bdJson<Bead[]>(["gate", "list", "--limit", "0"]),
 

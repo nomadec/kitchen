@@ -41,6 +41,14 @@ DRY=0
 DATABASE=kitchen
 PORT=3307
 BD_VERSION=1.3.1
+DOLT_VERSION=2.6.2
+# The sha256 of each dolt-linux-<arch>.tar.gz of that release, read from the archives themselves at the time of pinning.
+dolt_sha256() {
+  case $1 in
+    amd64) echo e27a7957b8626946a5022fe0ad6ce4bfb3c8f51544c7f1372b0e6db14c1549cf ;;
+    arm64) echo 0004e5927f6eeff40493c0800fe7aa7bb73750305968e58eb024de48116eaad6 ;;
+  esac
+}
 
 while [ $# -gt 0 ]; do
   case $1 in
@@ -74,7 +82,7 @@ DOLT_DIR=$LIB/dolt
 SPACE_DIR=$LIB/space
 BIN=$ROOT/usr/local/bin
 UNIT=$ROOT/etc/systemd/system/kitchen-dolt.service
-DOLT_INSTALL_URL=https://github.com/dolthub/dolt/releases/latest/download/install.sh
+DOLT_RELEASES=https://github.com/dolthub/dolt/releases/download
 BD_RELEASES=https://github.com/gastownhall/beads/releases/download
 
 # A fresh host is what --dry-run describes; real runs probe the host.
@@ -85,6 +93,8 @@ run() { printf '+ %s\n' "$*"; fresh || "$@"; }
 run_sh() { printf '+ %s\n' "$1"; fresh || bash -c "$1"; }
 # run_shown TEXT CMD...: printed as TEXT, which stands in for anything secret.
 run_shown() { local shown=$1; shift; printf '+ %s\n' "$shown"; fresh || "$@"; }
+# sha256_check SUM FILE: refuses a download whose checksum is not the pinned one.
+sha256_check() { printf '%s  %s\n' "$1" "$2" | sha256sum --check --status || die "checksum mismatch on $2: not the pinned release"; }
 
 # write_file PATH MODE OWNER < content: writes only when the content differs.
 # Returns 0 when it wrote (or would write), 1 when the file already matched.
@@ -131,17 +141,26 @@ else
   [ -n "$ADDR" ] || die "no IPv4 address on $IFACE"
 fi
 
-# 2. Dolt, from DoltHub's installer, into /usr/local/bin.
-if fresh || ! command -v dolt >/dev/null 2>&1; then
-  run_sh "curl -fsSL $DOLT_INSTALL_URL | bash"
+# 2. Dolt, the pinned release, verified against its checksum, into /usr/local/bin.
+case $(uname -m) in
+  x86_64) ARCH=amd64 ;;
+  aarch64 | arm64) ARCH=arm64 ;;
+  *) die "no dolt or beads release for $(uname -m)" ;;
+esac
+if fresh || ! { command -v dolt >/dev/null 2>&1 && dolt version 2>/dev/null | grep -q "^dolt version $DOLT_VERSION$"; }; then
+  DOLT_ARCHIVE=dolt-linux-$ARCH.tar.gz
+  DOLT_SUM=$(dolt_sha256 "$ARCH")
+  run_shown "mktemp -d" true
+  if fresh; then TMP='<temp dir>'; else TMP=$(mktemp -d); fi
+  run curl -fsSL -o "$TMP/$DOLT_ARCHIVE" "$DOLT_RELEASES/v$DOLT_VERSION/$DOLT_ARCHIVE"
+  run_shown "sha256sum --check <<< \"<pinned sha256 for $ARCH>  $TMP/$DOLT_ARCHIVE\"" sha256_check "$DOLT_SUM" "$TMP/$DOLT_ARCHIVE"
+  run tar -xzf "$TMP/$DOLT_ARCHIVE" -C "$TMP" "dolt-linux-$ARCH/bin/dolt"
+  run install -o 0 -g 0 -m 755 "$TMP/dolt-linux-$ARCH/bin/dolt" "$BIN/dolt"
+  run rm -rf "$TMP"
 fi
 
 # 3. bd, the pinned beads release, into /usr/local/bin.
-case $(uname -m) in
-  x86_64) BD_ARCH=amd64 ;;
-  aarch64 | arm64) BD_ARCH=arm64 ;;
-  *) die "no beads release for $(uname -m)" ;;
-esac
+BD_ARCH=$ARCH
 if fresh || ! { command -v bd >/dev/null 2>&1 && bd version 2>/dev/null | grep -q "^bd version $BD_VERSION "; }; then
   BD_ARCHIVE=beads_${BD_VERSION}_linux_${BD_ARCH}.tar.gz
   run_shown "mktemp -d" true

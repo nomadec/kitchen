@@ -1,14 +1,17 @@
 // Starting and ending one turn: the take on the order and the claim on the phase, both under the
 // station actor because beads requires them from the holder, the order's worktrees between them, then
 // the runner. While the child lives the station heartbeats both leases on an interval and the station's
-// wall-clock timeout kills a child that outlives it. At the end the result line is commented on the
-// phase as the expeditor; a phase the child left open is released by the station and restored by the
-// expeditor to the station its `station:` label names, a failed turn counted on it as `failed:<n>`,
-// and the second failure lays the `turn failed` pass for the owner. The order is released by the
-// station on every path. The expeditor's dispatch and a foreground `kitchen turn` share these two
-// functions.
+// wall-clock timeout kills a child that outlives it. At the end the result line (the session's last
+// line, else the `result:` note the driver writes when its output is the terminal's) is commented on
+// the phase as the expeditor; a phase the child left open is set open again by the station, the
+// holder, in one write that keeps it assigned to the station its `station:` label names and counts a
+// failed turn as `failed:<n>`, and the second failure lays the `turn failed` pass for the owner as
+// the expeditor. A phase or an order this station holds no longer (reclaimed and taken elsewhere) is
+// left alone. The order is released by the station on every other path. The expeditor's dispatch and
+// a foreground `kitchen turn` share these two functions.
 import { durationMs, sleptOut } from "../clock.ts";
 import type { Clock } from "../clock.ts";
+import { noteLine } from "../fields.ts";
 import { FAILED, FAILURES_BEFORE_PASS, failures, restoreStation } from "../laid.ts";
 import type { LaidPhase } from "../laid.ts";
 import { parseOrder } from "../order.ts";
@@ -18,6 +21,7 @@ import { SpaceError } from "../space.ts";
 import type { Bead, Space } from "../space.ts";
 import { offeredCheckouts } from "../station.ts";
 import type { Station } from "../station.ts";
+import { LaunchError } from "./claude.ts";
 import type { TurnHandle, TurnMode, TurnRunner } from "./claude.ts";
 import { ensureWorktree, PER_ORDER, WorktreeError } from "./worktree.ts";
 import type { Worktree } from "./worktree.ts";
@@ -30,6 +34,9 @@ export const TURN_FAILED = "turn failed";
 
 /** What the harness prints (on standard error, and in a print-mode result) when a headless session reaches its dollar cap. */
 const BUDGET_OVERRUN = /Budget limit reached|past its --max-budget-usd limit/;
+
+/** The note the turn driver writes its result line into, read when the session's output was the terminal's. */
+export const RESULT_NOTE = "result";
 
 export interface Turn {
   phase: LaidPhase;
@@ -47,10 +54,13 @@ export type TurnStart =
   | { kind: "held"; by: string }
   /** The phase was claimed first by another expeditor; the take is released again. */
   | { kind: "claimed"; by: string }
-  /** A worktree could not be prepared, git saying why; the take is released again. */
+  /** A worktree could not be prepared (git saying why) or the launch could not (a secret unresolved); the take, and a claim made, are released again. */
   | { kind: "unprepared"; reason: string };
 
-/** The turn closed its phase; left it open, so it was reclaimed; or failed, so it was reopened with a count. */
+/**
+ * The turn closed its phase; left it open, so it was reclaimed (open again for its station, or left
+ * to the holder that took it meanwhile); or failed, so it was reopened with a count.
+ */
 export type TurnOutcome = "closed" | "reclaimed" | "failed";
 
 export interface TurnEnd {
@@ -102,7 +112,15 @@ export async function startTurn(deps: StartTurnDeps, station: Station, phase: La
     await deps.station.release(order);
     return { kind: "claimed", by: holder };
   }
-  const handle = deps.runner({ launch: station.launch, phase, mode, order: parsed, worktrees });
+  let handle: TurnHandle;
+  try {
+    handle = deps.runner({ launch: station.launch, phase, mode, order: parsed, worktrees });
+  } catch (error) {
+    if (!(error instanceof LaunchError)) throw error;
+    await deps.station.release({ id: phase.id, issue_type: "task" });
+    await deps.station.release(order);
+    return { kind: "unprepared", reason: error.message };
+  }
   return { kind: "started", turn: { phase, station, order: parsed, mode, worktrees, handle } };
 }
 
@@ -144,11 +162,11 @@ export interface EndTurnDeps {
 /**
  * Keeps the leases alive and the wall clock watched until the session ends, comments its result line
  * on the phase, settles the phase (closed, reclaimed or failed) and releases the order, whatever
- * happened before, except when the turn closed the order itself: that close is the take's end.
+ * happened before, except when the turn closed the order itself (that close is the take's end) or
+ * when another holder took it meanwhile (the take is theirs).
  */
 export async function endTurn(deps: EndTurnDeps, turn: Turn): Promise<TurnEnd> {
   const order = { id: turn.order.id, issue_type: "epic" };
-  let releaseOrder = true;
   try {
     const ended = new AbortController();
     const lease = keepLease(deps, turn, ended.signal);
@@ -157,30 +175,29 @@ export async function endTurn(deps: EndTurnDeps, turn: Turn): Promise<TurnEnd> {
     ended.abort();
     await lease;
     const killed = await watch;
-    const resultLine = lastLine(result.stdout) ?? `exit ${result.exitCode}`;
-    await deps.expeditor.comment(turn.phase.id, resultLine);
     const phase = await deps.expeditor.show(turn.phase.id);
-    if (phase.status === "closed") {
-      // The turn that closes the order (`Order done: ...`) ended the take with that close; the release,
-      // which sets the order open again, would undo it. A closed order holds nothing and stays closed.
-      releaseOrder = (await deps.expeditor.show(order.id)).status !== "closed";
-      return { resultLine, exitCode: result.exitCode, outcome: "closed" };
-    }
-    // Left open: the station's claim is released and the phase goes back to the station it was laid for.
-    await deps.station.release(phase);
+    const resultLine = lastLine(result.stdout) ?? (noteLine(phase.notes ?? "", RESULT_NOTE) || `exit ${result.exitCode}`);
+    await deps.expeditor.comment(turn.phase.id, resultLine);
+    if (phase.status === "closed") return { resultLine, exitCode: result.exitCode, outcome: "closed" };
+    // Left open, but held by another now: its lease went stale, was reclaimed, and another turn took it.
+    if (phase.assignee !== turn.phase.station) return { resultLine, exitCode: result.exitCode, outcome: "reclaimed" };
     const failure = failureOf(result, killed);
     if (failure === undefined) {
-      await restoreStation(deps.expeditor, phase);
+      // Open again for the station it was laid for, in the one write beads allows the holder.
+      await restoreStation(deps.station, phase, { status: "open" });
       return { resultLine, exitCode: result.exitCode, outcome: "reclaimed" };
     }
     const before = failures(phase);
     const count = before + 1;
-    await restoreStation(deps.expeditor, phase, { addLabels: [`${FAILED}:${count}`], removeLabels: before ? [`${FAILED}:${before}`] : [] });
+    await restoreStation(deps.station, phase, { status: "open", addLabels: [`${FAILED}:${count}`], removeLabels: before ? [`${FAILED}:${before}`] : [] });
     const end: TurnEnd = { resultLine, exitCode: result.exitCode, outcome: "failed", failure, failures: count };
     if (count >= FAILURES_BEFORE_PASS) end.pass = await layTurnFailedPass(deps, turn, phase, { count, failure, resultLine });
     return end;
   } finally {
-    if (releaseOrder) await deps.station.release(order);
+    // The turn that closes the order (`Order done: ...`) ended the take with that close, and a release
+    // would open it again; an order another station holds now is that station's to release.
+    const held = await deps.expeditor.show(order.id);
+    if (held.status === "in_progress" && held.assignee === turn.phase.station) await deps.station.release(order);
   }
 }
 
@@ -211,9 +228,14 @@ async function watchClock(deps: EndTurnDeps, turn: Turn, signal: AbortSignal): P
   return reason;
 }
 
-/** Why the turn failed: the kill, the budget overrun the harness reported, or a non-zero exit. */
+/**
+ * Why the turn failed: the kill, the budget overrun the harness reported, or a non-zero exit. A child
+ * a signal ended that was not the wall clock's (`kitchen down` stopping the service, with the child)
+ * is no failure of the turn: the phase is reclaimed, and a restart loses nothing.
+ */
 function failureOf(result: CommandResult, killed: string | undefined): string | undefined {
   if (killed !== undefined) return killed;
+  if (result.signal !== undefined) return undefined;
   if (BUDGET_OVERRUN.test(result.stderr) || BUDGET_OVERRUN.test(result.stdout)) return "budget overrun reported by the harness";
   if (result.exitCode !== 0) return `exit ${result.exitCode}`;
   return undefined;
@@ -221,14 +243,13 @@ function failureOf(result: CommandResult, killed: string | undefined): string | 
 
 /** The pass for the owner, a child of the order, blocking the phase until the owner's word. */
 async function layTurnFailedPass(deps: EndTurnDeps, turn: Turn, phase: Bead, last: { count: number; failure: string; resultLine: string }): Promise<string> {
-  const pass = await deps.expeditor.layGate({
+  const pass = await deps.expeditor.layPass({
+    order: turn.order.id,
     blocks: phase.id,
-    type: "human",
     title: `${TURN_FAILED}: ${turn.phase.slug}`,
-    reason: `${phase.id} (${phase.title}) failed ${last.count} times on ${turn.phase.station}; the last turn ${last.failure}: ${last.resultLine}`,
+    brief: `${phase.id} (${phase.title}) failed ${last.count} times on ${turn.phase.station}; the last turn ${last.failure}: ${last.resultLine}`,
+    owner: deps.owner,
   });
-  // bd gate create takes no parent or assignee: a second call makes the pass the order's child, for the owner.
-  await deps.expeditor.update(pass, { parent: turn.order.id, assignee: deps.owner });
   return pass.id;
 }
 

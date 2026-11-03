@@ -9,10 +9,10 @@ The UI is a static single-page app your own host's expeditor serves (story 69, A
 | What | Where | Why |
 | --- | --- | --- |
 | The expeditor | this process | the tick |
-| `bd serve` | `127.0.0.1:<port+1>`, 4818 by default | the beads HTTP API over the space, as a child the expeditor stops on exit |
+| `bd serve` | `127.0.0.1:<port+1>`, 4818 by default; a free port of the host's choosing under `--port 0` | the beads HTTP API over the space, as a child the expeditor stops on exit |
 | The UI server | `127.0.0.1:<port>`, 4817 by default | the bundled page, `/me`, and every `/v0/...` request passed through to `bd serve` |
 
-`--port` on `kitchen up` sets the UI port and is written into the service unit; `bd serve` always takes the next port (`--port 0`, for a check by hand, gives the UI an ephemeral port and `bd serve` 4818, so two such runs on one host collide there). Both bind loopback only: nothing on the network reaches either without a tunnel you set up yourself (below). The expeditor's log line `{"step":"serve","ui":...,"api":...,"token":...}` says where each listens.
+`--port` on `kitchen up` sets the UI port and is written into the service unit; `bd serve` takes the next port. `--port 0`, for a check by hand, gives the UI an ephemeral port and `bd serve` a free port the expeditor picks (bd serve needs the port on its command line, so the expeditor binds port 0 once to learn a free one and releases it), so two such runs on one host do not collide. Both bind loopback only: nothing on the network reaches either without a tunnel you set up yourself (below). The expeditor's log line `{"step":"serve","ui":...,"api":...,"token":...}` says where each listens.
 
 `bd serve` needs the space's Dolt SQL server (`docs/onboarding.md`); it refuses to start otherwise. When it exits on its own the expeditor keeps ticking, logs one line `{"step":"serve","ended":"bd serve exited <code>","stderr":...}`, and every `/v0/...` request through the UI answers 502 naming the port nothing listens on. `kitchen down` then `kitchen up` starts it again.
 

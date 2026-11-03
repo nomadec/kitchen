@@ -12,6 +12,7 @@ const here = path.dirname(new URL(import.meta.url).pathname);
 const script = path.join(here, "install-server.sh");
 const bdArch = process.arch === "arm64" ? "arm64" : "amd64";
 
+
 type Outcome = { status: number | null; stdout: string; stderr: string };
 
 function scratch(t: { after(fn: () => void): void }): string {
@@ -45,7 +46,12 @@ test("a dry run prints the command sequence for a fresh host and runs nothing", 
   const bd = `HOME=${root}/var/lib/kitchen BEADS_DOLT_PASSWORD=<from ${root}/etc/kitchen/dolt.env> runuser -u kitchen -- bd -C ${root}/var/lib/kitchen/space`;
   assert.deepEqual(commands(r.stdout), [
     "ip -4 -o addr show dev tailscale0",
-    "curl -fsSL https://github.com/dolthub/dolt/releases/latest/download/install.sh | bash",
+    "mktemp -d",
+    `curl -fsSL -o <temp dir>/dolt-linux-${bdArch}.tar.gz https://github.com/dolthub/dolt/releases/download/v2.6.2/dolt-linux-${bdArch}.tar.gz`,
+    `sha256sum --check <<< "<pinned sha256 for ${bdArch}>  <temp dir>/dolt-linux-${bdArch}.tar.gz"`,
+    `tar -xzf <temp dir>/dolt-linux-${bdArch}.tar.gz -C <temp dir> dolt-linux-${bdArch}/bin/dolt`,
+    `install -o 0 -g 0 -m 755 <temp dir>/dolt-linux-${bdArch}/bin/dolt ${root}/usr/local/bin/dolt`,
+    "rm -rf <temp dir>",
     "mktemp -d",
     `curl -fsSL -o <temp dir>/beads_1.3.1_linux_${bdArch}.tar.gz https://github.com/gastownhall/beads/releases/download/v1.3.1/beads_1.3.1_linux_${bdArch}.tar.gz`,
     `tar -xzf <temp dir>/beads_1.3.1_linux_${bdArch}.tar.gz -C <temp dir> bd`,
@@ -115,7 +121,7 @@ function stubs(dir: string): { bin: string; log: string; calls(): string[] } {
   };
   stub("runuser", 'shift 3; exec "$@"');
   stub("ip", 'echo "5: tailscale0    inet 100.64.0.7/32 scope global tailscale0"');
-  stub("dolt", `[ -t 0 ] || printf 'dolt-stdin %s\\n' "$(cat)" >> "${log}"; exit 0`);
+  stub("dolt", `[ "$1" = version ] && echo "dolt version 2.6.2"; [ -t 0 ] || printf 'dolt-stdin %s\\n' "$(cat)" >> "${log}"; exit 0`);
   stub("bd", `printf 'bd-env HOME=%s BEADS_DOLT_PASSWORD=%s\\n' "$HOME" "\${BEADS_DOLT_PASSWORD:-}" >> "${log}"; [ "$1" = version ] && echo "bd version 1.3.1 (stub)"; [ "$3" = init ] && mkdir -p "$2/.beads"; exit 0`);
   stub("getent", `[ -e "${state}/user" ]`);
   stub("useradd", `touch "${state}/user"; while [ $# -gt 0 ]; do [ "$1" = --home-dir ] && mkdir -p "$2"; shift; done`);

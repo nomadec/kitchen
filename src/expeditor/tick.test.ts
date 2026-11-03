@@ -282,6 +282,57 @@ test("the turn's result line, the last line of its output, is appended as a comm
   });
 });
 
+test("a station naming secrets has each resolved on this host into the child's environment, from the expeditor's environment or the host's secret file, and never into the argv", async (t) => {
+  const withSecrets = (...names: string[]) => {
+    const row = station("kitchen-10", "oven", 2);
+    return { ...row, notes: row.notes.replace('"secrets":[]', `"secrets":${JSON.stringify(names)}`) };
+  };
+  const k = kitchen(t, [stations(withSecrets("GITHUB_TOKEN", "NPM_TOKEN")), ...ONE_READY.slice(1)]);
+  k.deps.env.GITHUB_TOKEN = "ghp_fromenv";
+  const file = path.join(k.configDir, "secrets", "NPM_TOKEN");
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, "npm_fromfile\n", { mode: 0o600 });
+
+  assert.equal(await k.run(), 0, k.err.join(""));
+
+  const [call] = k.claude();
+  assert.deepEqual(call?.env, {
+    GITHUB_TOKEN: "ghp_fromenv",
+    NPM_TOKEN: "npm_fromfile",
+    BEADS_ACTOR: "sona/oven",
+    BEADS_DIR: path.join(k.configDir, "space", ".beads"),
+    BEADS_CREDENTIALS_FILE: "/home/sona/.config/beads/credentials",
+  });
+  assert.ok(!call?.argv.some((arg) => arg.includes("fromenv") || arg.includes("fromfile")));
+  assert.ok(!fs.readFileSync(k.logFile, "utf8").includes("fromenv"), "the log carries no secret value");
+});
+
+test("a secret the host holds nowhere refuses the start: the claims are released, the phase is dropped naming the file that would hold it, and no child is spawned", async (t) => {
+  const row = station("kitchen-10", "oven", 2);
+  const k = kitchen(t, [
+    stations({ ...row, notes: row.notes.replace('"secrets":[]', '"secrets":["GITHUB_TOKEN"]') }),
+    ready("oven", phase("kitchen-21", "kitchen-20", "reproduce", "oven")),
+    held(),
+    running("oven"),
+    claimed("oven", "kitchen-20"),
+    claimed("oven", "kitchen-21"),
+    released("oven", "kitchen-21"),
+    released("oven", "kitchen-20"),
+  ]);
+
+  assert.equal(await k.run(), 0, k.err.join(""));
+
+  assert.equal(k.claude().length, 0);
+  assert.deepEqual(k.bd().filter((argv) => argv[2] === "update").map((argv) => argv.slice(3)), [
+    ["kitchen-20", "--claim", "--json"],
+    ["kitchen-21", "--claim", "--json"],
+    ["kitchen-21", "--status", "open", "--assignee", "", "--json"],
+    ["kitchen-20", "--status", "open", "--assignee", "", "--json"],
+  ]);
+  const dropped = k.log().find((line) => line.step === "dispatch" && line.dropped);
+  assert.equal(dropped?.dropped, `secret GITHUB_TOKEN is not set: the station names it, and this host holds it neither in the environment nor at ${path.join(k.configDir, "secrets", "GITHUB_TOKEN")}`);
+});
+
 test("a session that prints nothing has its exit code commented as the result line", async (t) => {
   const k = kitchen(t, [...ONE_READY.slice(0, 6), turn("", 3), commented("kitchen-21"), released("oven", "kitchen-20")]);
 

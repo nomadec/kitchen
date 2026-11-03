@@ -151,13 +151,15 @@ test("the running expeditor serves bd serve on loopback with a token file it own
   }
   const served = servedLine() as Record<string, unknown>;
   assert.match(served.ui as string, /^http:\/\/127\.0\.0\.1:\d+$/, "the UI is bound to loopback");
-  assert.equal(served.api, "http://127.0.0.1:4818");
+  assert.match(served.api as string, /^http:\/\/127\.0\.0\.1:\d+$/, "bd serve too takes a port of this host's choosing under --port 0, so two runs by hand do not collide");
+  assert.notEqual(served.api, "http://127.0.0.1:4818");
+  const apiPort = (served.api as string).split(":").at(-1);
   assert.equal(served.token, tokenFile);
   assert.deepEqual(await (await fetch(`${served.ui}/me`)).json(), { owner: "sona", host: "sona-laptop" }, "the UI server answers while the expeditor runs");
 
   const serve = k.runner.calls.find((c) => c.argv[0] === "bd" && c.argv[1] === "serve");
   assert.ok(serve, "bd serve was issued");
-  assert.deepEqual(serve.argv, ["bd", "serve", "--addr", "127.0.0.1:4818", "--auth-token-file", tokenFile]);
+  assert.deepEqual(serve.argv, ["bd", "serve", "--addr", `127.0.0.1:${apiPort}`, "--auth-token-file", tokenFile]);
   assert.deepEqual({ cwd: serve.cwd, env: serve.env }, k.connection, "bd serve runs over the space connection, like every bd call");
   assert.ok(serve.signal instanceof AbortSignal && !serve.signal.aborted, "bd serve runs until the expeditor is told to stop");
   assert.equal(fs.statSync(tokenFile).mode & 0o777, 0o600);

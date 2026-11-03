@@ -1,11 +1,15 @@
 // The tick: one pass of the expeditor over the work graph, as a sequence of named steps in the order
-// the spec lays them (Expeditor, ADR 0003). The steps for typed gates, Kitchen-laid passes, source
-// polling, lease heartbeats and reclaim are named here and filled by later slices.
+// the spec lays them (Expeditor, ADR 0003). The steps for typed gates, Kitchen-laid passes and source
+// polling are named here and filled by later slices. The leases of the turns this host runs are
+// heartbeated by the turns themselves (turn.ts), on their own interval between ticks; the `leases`
+// step reports them and the `reclaim` step reverts the stale leases bd finds and restores each phase's
+// assignee from its `station:` label, since reclaim clears it.
 // Every step writes one log line; what a step drops or starts is logged with the reason.
 import { expeditorActor, parseActor, stationActor } from "../actor.ts";
+import type { Clock } from "../clock.ts";
 import { readHostConfig } from "../config.ts";
 import type { HostConfig } from "../config.ts";
-import { parseLaidPhase, LaidPhaseError, WAITING } from "../laid.ts";
+import { FAILURES_BEFORE_PASS, parseLaidPhase, LaidPhaseError, restoreStation, WAITING } from "../laid.ts";
 import type { LaidPhase } from "../laid.ts";
 import { LOOP } from "../order.ts";
 import { readStations } from "../registered.ts";
@@ -15,7 +19,7 @@ import type { Space } from "../space.ts";
 import type { Station } from "../station.ts";
 import type { TurnRunner } from "./claude.ts";
 import type { Log } from "./log.ts";
-import { endTurn, startTurn } from "./turn.ts";
+import { endTurn, HEARTBEAT_INTERVAL_MS, startTurn, TURN_FAILED } from "./turn.ts";
 import type { Turn, TurnEnd } from "./turn.ts";
 import { removeWorktree, worktreeOrders, worktreePath } from "./worktree.ts";
 
@@ -30,6 +34,7 @@ export interface ExpeditorDeps {
   runner: CommandRunner;
   env: Record<string, string | undefined>;
   log: Log;
+  clock: Clock;
   turnRunner: TurnRunner;
 }
 
@@ -71,6 +76,8 @@ interface TickState {
 export function expeditor(deps: ExpeditorDeps): Expeditor {
   let count = 0;
   const endings: Promise<TurnEnd>[] = [];
+  /** The phases of the turns whose children live now. */
+  const alivePhases = new Set<string>();
 
   const log = (tick: number, step: TickStep, fields: Record<string, unknown> = {}): void => {
     deps.log.write({ tick, step, ...fields });
@@ -111,8 +118,24 @@ export function expeditor(deps: ExpeditorDeps): Expeditor {
     gates: later("gates", "bd gate check for the typed gates"),
     passes: later("passes", "the word on closed Kitchen-laid passes"),
     sources: later("sources", "polling this host's sources"),
-    leases: later("leases", "heartbeating the leases of the turns this host runs"),
-    reclaim: later("reclaim", "reclaiming stale leases and restoring the station: label"),
+    leases: async (state) => {
+      // The turns heartbeat their own leases on the interval while their children live (turn.ts); the
+      // tick reports the ones alive.
+      log(state.report.tick, "leases", { alive: [...alivePhases], interval: `${HEARTBEAT_INTERVAL_MS / 1000}s` });
+    },
+
+    reclaim: async (state) => {
+      // bd reclaim clears the assignee of every stale lease it reverts; a phase carries the station it
+      // was laid for as its `station:` label, so it goes back to that station. An order's take has no
+      // label and stays released, which is the release the dead turn never made.
+      const reclaimed = await state.space.reclaim();
+      const restored: Record<string, string> = {};
+      for (const lease of reclaimed) {
+        const station = await restoreStation(state.space, await state.space.show(lease.id));
+        if (station !== undefined) restored[lease.id] = station;
+      }
+      log(state.report.tick, "reclaim", { reclaimed: reclaimed.map((lease) => lease.id), restored });
+    },
     worktrees: async (state) => {
       // Every checkout of this host's stations, once each, with the orders that have a worktree in it;
       // an order is read once however many checkouts hold it. Cleanup runs on this host's own clock, so
@@ -138,7 +161,13 @@ export function expeditor(deps: ExpeditorDeps): Expeditor {
       for (const station of state.stations) {
         for (const bead of await state.space.ready({ assignee: station.title })) {
           try {
-            state.candidates.push({ phase: parseLaidPhase(bead), station });
+            const phase = parseLaidPhase(bead);
+            // bd ready should not list a phase behind its `turn failed` pass; one listed anyway is not retried.
+            if (phase.failures >= FAILURES_BEFORE_PASS) {
+              log(state.report.tick, "ready", { phase: phase.id, dropped: `failed:${phase.failures}: waits for the ${TURN_FAILED} pass` });
+              continue;
+            }
+            state.candidates.push({ phase, station });
           } catch (error) {
             if (!(error instanceof LaidPhaseError)) throw error;
             log(state.report.tick, "ready", { phase: bead.id, dropped: error.message });
@@ -202,9 +231,27 @@ export function expeditor(deps: ExpeditorDeps): Expeditor {
         state.running.set(station.title, (state.running.get(station.title) ?? 0) + 1);
         state.report.started.push(start.turn);
         log(state.report.tick, "dispatch", { phase: phase.id, order: phase.order, station: station.title, model: phase.model, worktrees: start.turn.worktrees.map((w) => w.path), argv: start.turn.handle.argv, cwd: start.turn.handle.cwd ?? null });
+        alivePhases.add(phase.id);
+        const tick = state.report.tick;
+        const ending = endTurn(
+          {
+            expeditor: state.space,
+            station: stationSpace,
+            clock: deps.clock,
+            owner: state.config.owner,
+            onHeartbeat: (event) => deps.log.write({ tick, step: "heartbeat", ...event }),
+            onKill: (killed) => deps.log.write({ tick, step: "turn", phase: phase.id, order: phase.order, station: station.title, killed }),
+          },
+          start.turn,
+        );
         endings.push(
-          endTurn({ expeditor: state.space, station: stationSpace }, start.turn).then((end) => {
-            deps.log.write({ tick: state.report.tick, step: "turn", phase: phase.id, order: phase.order, station: station.title, exit: end.exitCode, result: end.resultLine });
+          ending.finally(() => alivePhases.delete(phase.id)).then((end) => {
+            deps.log.write({
+              tick, step: "turn", phase: phase.id, order: phase.order, station: station.title,
+              exit: end.exitCode, result: end.resultLine, outcome: end.outcome,
+              ...(end.failure === undefined ? {} : { failure: end.failure, failures: end.failures }),
+              ...(end.pass === undefined ? {} : { pass: end.pass }),
+            });
             return end;
           }),
         );

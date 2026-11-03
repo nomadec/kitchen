@@ -54,10 +54,11 @@ export function initialisedHost(t: { after(fn: () => void): void }, table: reado
   fs.writeFileSync(configFile, JSON.stringify(config));
   const out: string[] = [];
   const err: string[] = [];
-  const runner = fakeRunner(table);
+  const clock = fakeClock();
+  const runner = fakeRunner(table, clock);
   const deps: CliDeps = {
     runner,
-    clock: fakeClock(),
+    clock,
     env: { HOME: home, XDG_CONFIG_HOME: path.join(home, ".config"), PATH: "/usr/local/bin:/usr/bin", ...options.sessionEnv },
     hostname: config.host,
     program: { platform: options.platform ?? "linux", ...TEST_PROGRAM },

@@ -60,6 +60,7 @@ async function foreground(deps: CliDeps, interval: number, once: boolean): Promi
     runner: deps.runner,
     env: deps.env,
     log,
+    clock: deps.clock,
     turnRunner: claudeRunner({ runner: deps.runner, env: deps.env, config, pluginDir: deps.program.pluginDir }),
   });
   if (once) {

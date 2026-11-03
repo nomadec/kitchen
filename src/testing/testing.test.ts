@@ -48,3 +48,31 @@ test("a fake clock stands still until advanced, and sleeping advances it", async
   await clock.sleep(1_500);
   assert.equal(clock.now().toISOString(), "2026-11-03T09:01:01.500Z");
 });
+
+test("a fake clock wakes sleepers in due order, the earliest first, and an aborted sleep is forgotten", async () => {
+  const clock = fakeClock(new Date("2026-11-03T09:00:00Z"));
+  const woke: string[] = [];
+  const later = clock.sleep(3_000).then(() => woke.push(`later at ${clock.now().toISOString()}`));
+  const sooner = clock.sleep(1_000).then(() => woke.push(`sooner at ${clock.now().toISOString()}`));
+  const stopper = new AbortController();
+  const never = clock.sleep(2_000, { signal: stopper.signal }).then(() => woke.push("never"), (error: Error) => woke.push(error.name));
+  stopper.abort();
+  await Promise.all([later, sooner, never]);
+  assert.deepEqual(woke, ["AbortError", "sooner at 2026-11-03T09:00:01.000Z", "later at 2026-11-03T09:00:03.000Z"]);
+});
+
+test("a fake runner row that lasts answers once that long has passed on the clock, or as a killed child when its signal aborts first", async () => {
+  const clock = fakeClock(new Date("2026-11-03T09:00:00Z"));
+  const runner = fakeRunner([{ command: "claude", args: [], stdout: "done\n", lasts: 90_000 }], clock);
+
+  const result = await runner(["claude", "--print"]);
+  assert.deepEqual(result, { stdout: "done\n", stderr: "", exitCode: 0 });
+  assert.equal(clock.now().toISOString(), "2026-11-03T09:01:30.000Z");
+
+  const killer = new AbortController();
+  const killed = runner(["claude", "--print"], { signal: killer.signal });
+  await clock.sleep(10_000);
+  killer.abort();
+  assert.deepEqual(await killed, { stdout: "", stderr: "", exitCode: 128 });
+  assert.equal(clock.now().toISOString(), "2026-11-03T09:01:40.000Z", "the killed child's wake was forgotten, not slept out");
+});

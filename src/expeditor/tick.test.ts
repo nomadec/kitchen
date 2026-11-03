@@ -13,8 +13,14 @@ import type { ScriptedAnswer } from "../testing/index.ts";
 const EXPEDITOR = ["--actor", "sona/expeditor"];
 const PROMPT = (phase: string) => `Invoke the Skill tool with skill "kitchen:turn" and args "${phase}"`;
 
+/** Beneath every table: no stale lease to reclaim, and a phase read back after its turn is closed. The lease tests script the rest. */
+const SETTLED: ScriptedAnswer[] = [
+  { command: "bd", args: [...EXPEDITOR, "reclaim", "--json"], stdout: '{"count":0,"reclaimed":null,"schema_version":1,"scoped":false}' },
+  { command: "bd", args: [...EXPEDITOR, "show"], stdout: '[{"id":"kitchen-21","status":"closed","issue_type":"task"}]' },
+];
+
 function kitchen(t: { after(fn: () => void): void }, table: readonly ScriptedAnswer[]) {
-  const host = initialisedHost(t, table);
+  const host = initialisedHost(t, [...table, ...SETTLED]);
   const run = (...argv: string[]) => main(["up", "--foreground", "--once", ...argv], host.deps);
   /** Every bd call's argv after `bd`, actor included. */
   const bd = () => host.runner.calls.filter((c) => c.argv[0] === "bd").map((c) => c.argv.slice(1));
@@ -257,9 +263,11 @@ test("the turn's result line, the last line of its output, is appended as a comm
     assert.equal(line.tick, 1);
     assert.match(String(line.at), /^2026-01-01T00:00:00\.000Z$/);
   }
-  for (const step of ["gates", "passes", "sources", "leases", "reclaim"]) {
+  for (const step of ["gates", "passes", "sources"]) {
     assert.match(String(k.log().find((line) => line.step === step)?.skipped), /a later slice/);
   }
+  assert.deepEqual(k.log().find((line) => line.step === "leases")?.alive, [], "no turn lives yet at the first tick's leases step");
+  assert.deepEqual(k.log().find((line) => line.step === "reclaim")?.reclaimed, []);
   const turn = k.log().find((line) => line.step === "turn");
   assert.deepEqual({ phase: turn?.phase, order: turn?.order, exit: turn?.exit, result: turn?.result }, {
     phase: "kitchen-21", order: "kitchen-20", exit: 0, result: "kitchen-21 closed: https://github.com/nomadec/kitchen/pull/9",

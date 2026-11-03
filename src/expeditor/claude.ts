@@ -25,12 +25,14 @@ export interface TurnRequest {
   worktrees: Worktree[];
 }
 
-/** A running turn: what was spawned, and its result when the child exits. */
+/** A running turn: what was spawned, its result when the child exits, and the way to end it first. */
 export interface TurnHandle {
   argv: readonly string[];
   cwd?: string;
   env: Record<string, string>;
   done: Promise<CommandResult>;
+  /** Kills the child: the station's wall-clock timeout. `done` then settles with the signal's exit code. */
+  kill(): void;
 }
 
 export type TurnRunner = (request: TurnRequest) => TurnHandle;
@@ -58,7 +60,13 @@ export function claudeRunner(deps: ClaudeRunnerDeps): TurnRunner {
       BEADS_DIR: beadsDir(deps.env),
       BEADS_CREDENTIALS_FILE: deps.config.credential,
     };
-    const handle: TurnHandle = { argv, env, done: deps.runner(argv, cwd === undefined ? { env } : { cwd, env }) };
+    const killer = new AbortController();
+    const handle: TurnHandle = {
+      argv,
+      env,
+      done: deps.runner(argv, { ...(cwd === undefined ? {} : { cwd }), env, signal: killer.signal }),
+      kill: () => killer.abort(),
+    };
     if (cwd !== undefined) handle.cwd = cwd;
     return handle;
   };

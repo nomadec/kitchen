@@ -152,8 +152,18 @@ export interface Space {
   claim(bead: BeadRef): Promise<Bead>;
   /** Releases a claim this actor holds: the bead is open and unassigned again. */
   release(bead: BeadRef): Promise<void>;
+  /** Refreshes the lease on a bead this actor holds, as `bd heartbeat` does; a SpaceError once it is held no longer. */
+  heartbeat(id: string): Promise<void>;
+  /** Reverts the stale leases in the space to open and unassigned, as `bd reclaim` does, and answers what it reverted. */
+  reclaim(): Promise<ReclaimedLease[]>;
   /** Appends a comment to a bead: a turn's result line on its phase. */
   comment(id: string, text: string): Promise<void>;
+}
+
+/** One lease `bd reclaim` reverted, as its --json lists them; only the bead's id is named. */
+export interface ReclaimedLease {
+  id: string;
+  [field: string]: unknown;
 }
 
 /** The pointer every refusal ends with. */
@@ -316,6 +326,16 @@ export function openSpace(deps: SpaceDeps): Space {
       refuseRegistered("edit", bead.issue_type);
       // An empty assignee is the one flag value flag() would drop, so the argv is spelled out.
       await bdJson<unknown>(["update", bead.id, "--status", "open", "--assignee", ""]);
+    },
+
+    heartbeat: async (id) => {
+      await bdJson<unknown>(["heartbeat", id]);
+    },
+
+    reclaim: async () => {
+      // bd reclaim --json answers { count, reclaimed: [...] | null, ... }.
+      const answer = await bdJson<{ reclaimed?: ReclaimedLease[] | null }>(["reclaim"]);
+      return answer.reclaimed ?? [];
     },
 
     comment: async (id, text) => {

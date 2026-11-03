@@ -3,7 +3,7 @@
 import { labelValue, noteLine } from "./fields.ts";
 import { parsePhaseFile, PhaseError } from "./recipe/phase.ts";
 import type { Budget } from "./recipe/phase.ts";
-import type { Bead } from "./space.ts";
+import type { Bead, Space, UpdateFields } from "./space.ts";
 
 /** The label the expeditor puts on a ready phase of an attended station: it waits for `kitchen turn`. */
 export const WAITING = "waiting";
@@ -23,6 +23,32 @@ export interface LaidPhase {
   /** The dollar cap and the effort the runner maps to harness flags. */
   budget: Budget;
   labels: string[];
+  /** How many turns have failed on it: the `failed:<n>` label, 0 without one. */
+  failures: number;
+}
+
+/** The label the expeditor counts failed turns with. */
+export const FAILED = "failed";
+
+/** A phase with this many failures waits for the `turn failed` pass; the expeditor starts no further turn. */
+export const FAILURES_BEFORE_PASS = 2;
+
+/** The failure count a bead carries. */
+export function failures(bead: Pick<Bead, "labels">): number {
+  const count = Number(labelValue(bead, FAILED) ?? 0);
+  return Number.isInteger(count) && count > 0 ? count : 0;
+}
+
+/**
+ * Assigns a released phase back to the station its `station:` label names (ADR 0002: the station it
+ * was laid for), with any other fields given in the same write; answers the station, or nothing for a
+ * bead without the label (an order), which is left as it is.
+ */
+export async function restoreStation(space: Space, bead: Bead, fields: Omit<UpdateFields, "assignee"> = {}): Promise<string | undefined> {
+  const station = labelValue(bead, "station");
+  if (station === undefined) return undefined;
+  await space.update({ id: bead.id, issue_type: bead.issue_type }, { ...fields, assignee: station });
+  return station;
 }
 
 /** A bead that cannot be a laid phase; the message names what is missing. */
@@ -61,5 +87,6 @@ export function parseLaidPhase(bead: Bead): LaidPhase {
     model,
     budget: registered.budget,
     labels: [...(bead.labels ?? [])],
+    failures: failures(bead),
   };
 }

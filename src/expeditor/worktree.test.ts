@@ -14,6 +14,12 @@ const EXPEDITOR = ["--actor", "sona/expeditor"];
 const PHASE_TEXT = (slug: string) =>
   `---\nphase: ${slug}\nskill: umka:${slug}\nfrom: []\nto: []\nartifact: a PR\nmodel: claude-opus-5\nentry: [ticket]\nbudget:\n  usd: 5\n  effort: high\n---\n# ${slug}\n`;
 
+/** Beneath every table: no stale lease to reclaim, and a phase read back after its turn is closed (lease.test.ts scripts the rest). */
+const SETTLED: ScriptedAnswer[] = [
+  { command: "bd", args: [...EXPEDITOR, "reclaim", "--json"], stdout: '{"count":0,"reclaimed":null,"schema_version":1,"scoped":false}' },
+  { command: "bd", args: [...EXPEDITOR, "show"], stdout: '[{"id":"kitchen-21","status":"closed","issue_type":"task"}]' },
+];
+
 /** A host whose station checks out two repositories under its home. */
 function kitchen(t: { after(fn: () => void): void }, table: (checkouts: { kitchen: string; sona: string }) => readonly ScriptedAnswer[]) {
   // The checkouts live under the host's home, which exists only once the host does; the fake runner
@@ -21,7 +27,7 @@ function kitchen(t: { after(fn: () => void): void }, table: (checkouts: { kitche
   const rows: ScriptedAnswer[] = [];
   const host = initialisedHost(t, rows);
   const checkouts = { kitchen: path.join(host.home, "src", "kitchen"), sona: path.join(host.home, "src", "sona") };
-  rows.push(...table(checkouts));
+  rows.push(...table(checkouts), ...SETTLED);
   const run = () => main(["up", "--foreground", "--once"], host.deps);
   const git = () => host.runner.calls.filter((c) => c.argv[0] === "git").map((c) => c.argv.slice(1));
   const claude = () => host.runner.calls.filter((c) => c.argv[0] === "claude");

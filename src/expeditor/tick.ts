@@ -1,6 +1,6 @@
 // The tick: one pass of the expeditor over the work graph, as a sequence of named steps in the order
 // the spec lays them (Expeditor, ADR 0003). The steps for typed gates, Kitchen-laid passes, source
-// polling, lease heartbeats, reclaim and worktree cleanup are named here and filled by later slices.
+// polling, lease heartbeats and reclaim are named here and filled by later slices.
 // Every step writes one log line; what a step drops or starts is logged with the reason.
 import { expeditorActor, parseActor, stationActor } from "../actor.ts";
 import { readHostConfig } from "../config.ts";
@@ -17,6 +17,7 @@ import type { TurnRunner } from "./claude.ts";
 import type { Log } from "./log.ts";
 import { endTurn, startTurn } from "./turn.ts";
 import type { Turn, TurnEnd } from "./turn.ts";
+import { removeWorktree, worktreeOrders, worktreePath } from "./worktree.ts";
 
 /** The steps of a tick, in order. */
 export const TICK_STEPS = [
@@ -112,7 +113,26 @@ export function expeditor(deps: ExpeditorDeps): Expeditor {
     sources: later("sources", "polling this host's sources"),
     leases: later("leases", "heartbeating the leases of the turns this host runs"),
     reclaim: later("reclaim", "reclaiming stale leases and restoring the station: label"),
-    worktrees: later("worktrees", "removing the worktrees of closed orders"),
+    worktrees: async (state) => {
+      // Every checkout of this host's stations, once each, with the orders that have a worktree in it;
+      // an order is read once however many checkouts hold it. Cleanup runs on this host's own clock, so
+      // an order closed while the host was off is removed on its first tick back.
+      const checkouts = [...new Set(state.stations.flatMap((s) => s.launch.repositories.map((r) => r.path)))];
+      const holding = new Map<string, string[]>();
+      for (const checkout of checkouts) {
+        for (const order of worktreeOrders(checkout)) holding.set(order, [...(holding.get(order) ?? []), checkout]);
+      }
+      const removed: string[] = [];
+      const kept: string[] = [];
+      for (const [order, paths] of holding) {
+        const closed = (await state.space.show(order)).status === "closed";
+        for (const checkout of paths) {
+          if (closed) removed.push(await removeWorktree(deps.runner, checkout, order));
+          else kept.push(worktreePath(checkout, order));
+        }
+      }
+      log(state.report.tick, "worktrees", { removed, kept });
+    },
 
     ready: async (state) => {
       for (const station of state.stations) {
@@ -172,15 +192,16 @@ export function expeditor(deps: ExpeditorDeps): Expeditor {
         }
         const stationSpace = state.stationSpaces.get(station.title);
         if (!stationSpace) continue;
-        const start = await startTurn({ station: stationSpace, runner: deps.turnRunner }, station, phase, "headless");
+        const start = await startTurn({ station: stationSpace, runner: deps.turnRunner, git: deps.runner }, station, phase, "headless");
         if (start.kind !== "started") {
-          log(state.report.tick, "dispatch", { phase: phase.id, order: phase.order, dropped: `${start.kind === "held" ? "order held" : "phase claimed"} by ${start.by}` });
+          const dropped = start.kind === "held" ? `order held by ${start.by}` : start.kind === "claimed" ? `phase claimed by ${start.by}` : start.reason;
+          log(state.report.tick, "dispatch", { phase: phase.id, order: phase.order, dropped });
           continue;
         }
         state.held.set(phase.order, station.title);
         state.running.set(station.title, (state.running.get(station.title) ?? 0) + 1);
         state.report.started.push(start.turn);
-        log(state.report.tick, "dispatch", { phase: phase.id, order: phase.order, station: station.title, model: phase.model, argv: start.turn.handle.argv, cwd: start.turn.handle.cwd ?? null });
+        log(state.report.tick, "dispatch", { phase: phase.id, order: phase.order, station: station.title, model: phase.model, worktrees: start.turn.worktrees.map((w) => w.path), argv: start.turn.handle.argv, cwd: start.turn.handle.cwd ?? null });
         endings.push(
           endTurn({ expeditor: state.space, station: stationSpace }, start.turn).then((end) => {
             deps.log.write({ tick: state.report.tick, step: "turn", phase: phase.id, order: phase.order, station: station.title, exit: end.exitCode, result: end.resultLine });

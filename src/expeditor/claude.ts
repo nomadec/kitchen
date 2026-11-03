@@ -1,14 +1,16 @@
 // The runner: one function from launch spec, phase and mode to a child process handle. The v1 runner
 // spawns the claude CLI in the Claude Code harness with the Kitchen plugin and the station's plugins,
-// the turn driver as the prompt, the station's checkout as the working directory, the actor and the
-// space connection in the environment, and the harness flags for model, effort and (headless only)
+// the turn driver as the prompt, the order's worktree (else the station's checkout) as the working
+// directory, the actor and the space connection in the environment, and the harness flags for model, effort and (headless only)
 // the print flag and the dollar cap. A Codex runner would be a second implementation of TurnRunner.
 import { beadsDir } from "../config.ts";
 import type { HostConfig } from "../config.ts";
 import type { LaidPhase } from "../laid.ts";
 import type { Order } from "../order.ts";
 import type { CommandResult, CommandRunner } from "../runner.ts";
+import { offeredCheckouts } from "../station.ts";
 import type { LaunchSpec } from "../station.ts";
+import type { Worktree } from "./worktree.ts";
 
 /** Headless on an unattended station; interactive in the human's terminal on an attended one. */
 export type TurnMode = "headless" | "interactive";
@@ -19,6 +21,8 @@ export interface TurnRequest {
   mode: TurnMode;
   /** The phase's order: its repositories decide the working directory. */
   order: Order;
+  /** The order's worktrees in the station's checkouts, when the phase touches code under the per-order policy. */
+  worktrees: Worktree[];
 }
 
 /** A running turn: what was spawned, and its result when the child exits. */
@@ -47,7 +51,7 @@ export const turnPrompt = (phaseId: string): string => `Invoke the Skill tool wi
 export function claudeRunner(deps: ClaudeRunnerDeps): TurnRunner {
   return (request) => {
     const argv = claudeArgv(deps.pluginDir, request);
-    const cwd = checkoutFor(request.launch, request.order);
+    const cwd = workingDirectory(request);
     const env = {
       // The station title is the turn actor (spec: Store, Actors).
       BEADS_ACTOR: request.phase.station,
@@ -69,10 +73,11 @@ function claudeArgv(pluginDir: string, { launch, phase, mode }: TurnRequest): st
 }
 
 /**
- * The working directory: until worktrees come, the station's checkout of the first repository the order
- * names that the station offers, else the station's first checkout.
+ * The working directory: the order's worktree in the checkout of the first repository the order names
+ * that the station offers; without worktrees, that checkout itself, else the station's first checkout.
  */
-function checkoutFor(launch: LaunchSpec, order: Order): string | undefined {
-  const named = order.repos.map((slug) => launch.repositories.find((r) => r.slug === slug)).find((r) => r !== undefined);
-  return (named ?? launch.repositories[0])?.path;
+function workingDirectory({ launch, order, worktrees }: TurnRequest): string | undefined {
+  const [named] = offeredCheckouts(launch, order.repos);
+  if (named) return worktrees.find((w) => w.slug === named.slug)?.path ?? named.path;
+  return launch.repositories[0]?.path;
 }

@@ -50,6 +50,11 @@ export interface LaunchSpec {
   secrets: string[];
 }
 
+/** The station's checkouts of the repositories an order names, in the order it names them; one it does not offer is left out. */
+export function offeredCheckouts(launch: LaunchSpec, repos: readonly string[]): { slug: string; path: string }[] {
+  return repos.flatMap((slug) => launch.repositories.filter((r) => r.slug === slug));
+}
+
 /** The values only the registering host knows. */
 export interface StationValues {
   owner: string;

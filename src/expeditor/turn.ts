@@ -1,20 +1,27 @@
 // Starting and ending one turn: the take on the order and the claim on the phase, both under the
-// station actor because beads requires them from the holder, then the runner; at the end, the result
-// line commented on the phase as the expeditor and the order released by the station. The expeditor's
-// dispatch and a foreground `kitchen turn` share these two functions.
+// station actor because beads requires them from the holder, the order's worktrees between them, then
+// the runner; at the end, the result line commented on the phase as the expeditor and the order
+// released by the station. The expeditor's dispatch and a foreground `kitchen turn` share these two
+// functions.
 import type { LaidPhase } from "../laid.ts";
 import { parseOrder } from "../order.ts";
 import type { Order } from "../order.ts";
+import type { CommandRunner } from "../runner.ts";
 import { SpaceError } from "../space.ts";
 import type { Space } from "../space.ts";
+import { offeredCheckouts } from "../station.ts";
 import type { Station } from "../station.ts";
 import type { TurnHandle, TurnMode, TurnRunner } from "./claude.ts";
+import { ensureWorktree, PER_ORDER, WorktreeError } from "./worktree.ts";
+import type { Worktree } from "./worktree.ts";
 
 export interface Turn {
   phase: LaidPhase;
   station: Station;
   order: Order;
   mode: TurnMode;
+  /** The order's worktrees in this station's checkouts, in the order the order names its repositories. */
+  worktrees: Worktree[];
   handle: TurnHandle;
 }
 
@@ -23,7 +30,9 @@ export type TurnStart =
   /** The order is held by another turn: its take refused the station, naming the holder. */
   | { kind: "held"; by: string }
   /** The phase was claimed first by another expeditor; the take is released again. */
-  | { kind: "claimed"; by: string };
+  | { kind: "claimed"; by: string }
+  /** A worktree could not be prepared, git saying why; the take is released again. */
+  | { kind: "unprepared"; reason: string };
 
 export interface TurnEnd {
   /** The last line of the session's standard output, or the exit code when it printed nothing. */
@@ -35,9 +44,11 @@ export interface StartTurnDeps {
   /** The space under the station actor: the take and the claim are written as the holder. */
   station: Space;
   runner: TurnRunner;
+  /** The command runner the worktrees' git calls go through. */
+  git: CommandRunner;
 }
 
-/** Takes the order, claims the phase and spawns the runner; stops at the first refusal. */
+/** Takes the order, prepares its worktrees, claims the phase and spawns the runner; stops at the first refusal. */
 export async function startTurn(deps: StartTurnDeps, station: Station, phase: LaidPhase, mode: TurnMode): Promise<TurnStart> {
   const order = { id: phase.order, issue_type: "epic" };
   let taken;
@@ -48,6 +59,15 @@ export async function startTurn(deps: StartTurnDeps, station: Station, phase: La
     if (holder) return { kind: "held", by: holder };
     throw error;
   }
+  const parsed = parseOrder(taken);
+  let worktrees: Worktree[];
+  try {
+    worktrees = await prepareWorktrees(deps.git, station, parsed);
+  } catch (error) {
+    if (!(error instanceof WorktreeError)) throw error;
+    await deps.station.release(order);
+    return { kind: "unprepared", reason: error.message };
+  }
   try {
     await deps.station.claim({ id: phase.id, issue_type: "task" });
   } catch (error) {
@@ -56,9 +76,22 @@ export async function startTurn(deps: StartTurnDeps, station: Station, phase: La
     await deps.station.release(order);
     return { kind: "claimed", by: holder };
   }
-  const parsed = parseOrder(taken);
-  const handle = deps.runner({ launch: station.launch, phase, mode, order: parsed });
-  return { kind: "started", turn: { phase, station, order: parsed, mode, handle } };
+  const handle = deps.runner({ launch: station.launch, phase, mode, order: parsed, worktrees });
+  return { kind: "started", turn: { phase, station, order: parsed, mode, worktrees, handle } };
+}
+
+/**
+ * A phase touches code when its order names repositories; under the per-order policy each one the
+ * station offers gets the order's worktree in that checkout, created or reused. Any other policy, or
+ * an order naming no repository, leaves the runner in the station's checkout.
+ */
+async function prepareWorktrees(git: CommandRunner, station: Station, order: Order): Promise<Worktree[]> {
+  if (station.launch.worktrees !== PER_ORDER) return [];
+  const worktrees: Worktree[] = [];
+  for (const checkout of offeredCheckouts(station.launch, order.repos)) {
+    worktrees.push(await ensureWorktree(git, checkout, order.id, station));
+  }
+  return worktrees;
 }
 
 export interface EndTurnDeps {

@@ -107,7 +107,7 @@ test("one tick issues the order take, the phase claim and a claude invocation ca
     "--dangerously-skip-permissions",
     PROMPT("kitchen-21"),
   ]);
-  assert.equal(call.cwd, "/home/sona/src/kitchen", "the station's checkout of the order's repository, until worktrees come");
+  assert.equal(call.cwd, "/home/sona/src/kitchen", "the station's first checkout: the taken order names no repository, so there is no worktree");
   assert.deepEqual(call.env, {
     BEADS_ACTOR: "sona/oven",
     BEADS_DIR: path.join(k.configDir, "space", ".beads"),
@@ -257,7 +257,7 @@ test("the turn's result line, the last line of its output, is appended as a comm
     assert.equal(line.tick, 1);
     assert.match(String(line.at), /^2026-01-01T00:00:00\.000Z$/);
   }
-  for (const step of ["gates", "passes", "sources", "leases", "reclaim", "worktrees"]) {
+  for (const step of ["gates", "passes", "sources", "leases", "reclaim"]) {
     assert.match(String(k.log().find((line) => line.step === step)?.skipped), /a later slice/);
   }
   const turn = k.log().find((line) => line.step === "turn");

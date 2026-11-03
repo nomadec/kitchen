@@ -20,6 +20,7 @@ process.exitCode = await main(process.argv.slice(2), {
     // <package>/dist/bin/kitchen.js and <package>/src/bin/kitchen.ts both sit two levels under the package root.
     pluginDir: path.resolve(path.dirname(script), "..", "..", "plugin"),
   },
+  stdin: process.stdin,
   stdout: (text) => process.stdout.write(text),
   stderr: (text) => process.stderr.write(text),
 });

@@ -44,6 +44,16 @@ kitchen init --server rbn3:3307 --owner sona
 
 The config lands in `$XDG_CONFIG_HOME/kitchen/config.json` (`~/.config/kitchen/config.json` by default) and holds the server, the credential reference, the owner and the host. No secret is written: the password stays in the beads credentials file the reference names. Next to it, `kitchen init` creates the beads workspace under `~/.config/kitchen/space` that every later `bd` command runs from, by running `bd init --server --external` against the configured server under the owner's actor. That call is the verification: when the server cannot be reached, `kitchen init` prints the command's stderr, exits non-zero and writes no config. Running `kitchen init` again re-initialises the existing workspace in place (local metadata only; the server's data is untouched) and a failed run never removes a workspace or a config that was already there.
 
+## The phase graph
+
+The design illustration is drawn from the space, not by hand. The generated file is `docs/phase-graph.md`: a Mermaid graph of the registered phases of every recipe's latest revision (pass phases, entry phases with their classes, `per:` fan-outs and cross-recipe edges) and the paths a reader can derive from each entry phase, each stopping where it returns to a phase already walked. It is committed with the first registration and regenerated after every `kitchen recipe add`, from a host that has run `kitchen init`:
+
+```sh
+node scripts/phase-graph.ts > docs/phase-graph.md
+```
+
+The script is not a CLI command; it reads the space with `bd list` and `bd show` under the owner's actor and writes nothing to it.
+
 ## Primitives
 
 Each line names a Kitchen primitive and the beads feature under it. The glossary defines the Kitchen word; this list is where the mapping lives.

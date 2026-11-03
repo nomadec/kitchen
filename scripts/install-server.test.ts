@@ -145,7 +145,7 @@ test("re-running creates nothing twice, and secrets travel by environment and st
   assert.match(fs.readFileSync(path.join(root, "etc/systemd/system/kitchen-dolt.service"), "utf8"), /^Environment=DOLT_ROOT_HOST=100\.64\.0\.7$/m);
   const rootEnv = fs.readFileSync(path.join(root, "etc/kitchen/dolt.env"), "utf8");
   assert.match(rootEnv, /^DOLT_ROOT_PASSWORD=[0-9a-f]{48}\n$/);
-  const rootPassword = rootEnv.split("=")[1].trim();
+  const rootPassword = (rootEnv.split("=")[1] ?? "").trim();
   const sona = fs.readFileSync(path.join(root, "etc/kitchen/credentials/sona"), "utf8").trim();
   assert.match(sona, /^[0-9a-f]{48}$/);
   assert.ok(firstCalls.includes(`dolt-stdin DROP USER IF EXISTS 'sona'@'%'; CREATE USER 'sona'@'%' IDENTIFIED BY '${sona}';`), "the SQL user gets the kept credential");

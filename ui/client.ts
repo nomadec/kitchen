@@ -5,8 +5,6 @@ export interface ClientDeps {
   fetch: typeof fetch;
   /** The bearer token from the expeditor's token file. */
   token: string;
-  /** The origin bd serve is reached through; the page's own when left out. */
-  base?: string;
 }
 
 /** A refusal, by the view itself (no request made) or by bd serve (its status and detail). */
@@ -35,14 +33,13 @@ export interface Client {
 }
 
 export function client(deps: ClientDeps): Client {
-  const base = deps.base ?? "";
   const headers = { authorization: `Bearer ${deps.token}` };
   const refused = (status: number, body: Problem, what: string): ViewError =>
     status === 401
       ? new ViewError(`the token was refused: ${body.detail ?? "missing or invalid bearer token"}`, status)
       : new ViewError(`bd serve refused ${what}: ${body.detail ?? body.code ?? `status ${status}`}`, status);
   const get = async <T>(path: string): Promise<{ status: number; body: T }> => {
-    const response = await deps.fetch(`${base}${path}`, { headers });
+    const response = await deps.fetch(path, { headers });
     return { status: response.status, body: (await response.json()) as T };
   };
   return {
@@ -54,7 +51,7 @@ export function client(deps: ClientDeps): Client {
       return body.items;
     },
     post: async (path, body) => {
-      const response = await deps.fetch(`${base}${path}`, { method: "POST", headers: { ...headers, "content-type": "application/json" }, body: JSON.stringify(body) });
+      const response = await deps.fetch(path, { method: "POST", headers: { ...headers, "content-type": "application/json" }, body: JSON.stringify(body) });
       return { status: response.status, body: (await response.json()) as Problem };
     },
   };

@@ -54,6 +54,8 @@ export interface CreateFields {
 export interface UpdateFields {
   title?: string;
   description?: string;
+  /** Reparents the bead: a gate, which `bd gate create` cannot parent, becomes a child of its order this way. */
+  parent?: string;
   /** Replaces the notes field whole; see setNote for one line of it. */
   notes?: string;
   appendNotes?: string;
@@ -70,6 +72,11 @@ export interface BeadFilter {
   labels?: readonly string[];
   type?: string;
   parent?: string;
+  /** The stored status: `open`, `in_progress`, `blocked`, `deferred`, `closed`. */
+  status?: string;
+  /** The exact external reference, or a substring of it: the two duplicate checks of intake. */
+  externalRef?: string;
+  externalContains?: string;
 }
 
 export type ReadyFilter = BeadFilter;
@@ -189,6 +196,7 @@ export function openSpace(deps: SpaceDeps): Space {
       "update", bead.id,
       ...flag("--title", fields.title),
       ...flag("--description", fields.description),
+      ...flag("--parent", fields.parent),
       ...flag("--notes", fields.notes),
       ...flag("--append-notes", fields.appendNotes),
       ...each("--add-label", fields.addLabels),
@@ -206,7 +214,8 @@ export function openSpace(deps: SpaceDeps): Space {
       return bdJson<Bead>([
         "create", fields.title,
         ...flag("--type", fields.type),
-        ...flag("--parent", fields.parent),
+        // A child carries the labels it is given, not its parent's: a laid phase is not `loop`.
+        ...(fields.parent ? ["--parent", fields.parent, "--no-inherit-labels"] : []),
         ...flag("--labels", fields.labels?.join(",")),
         ...flag("--notes", fields.notes),
         ...flag("--description", fields.description),
@@ -239,6 +248,9 @@ export function openSpace(deps: SpaceDeps): Space {
         ...each("--label", filter.labels),
         ...flag("--assignee", filter.assignee),
         ...flag("--parent", filter.parent),
+        ...flag("--status", filter.status),
+        ...flag("--external-ref", filter.externalRef),
+        ...flag("--external-contains", filter.externalContains),
         "--limit", "0",
       ]),
 

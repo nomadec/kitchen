@@ -16,8 +16,12 @@ export { loadTemplate, stationFields, parseStation, StationError, TEMPLATE_FILE 
 export type { Station, StationTemplate, StationValues, LaunchSpec } from "./station.ts";
 export { sourceFields, parseSource, SourceError, SOURCE_KINDS, CLASSES, isSourceKind, isOrderClass } from "./source.ts";
 export type { Source, SourceFields, SourceKind, OrderClass } from "./source.ts";
-export { readStations, readStation, readSources, readSource } from "./registered.ts";
-export type { RegisteredFilter } from "./registered.ts";
+export { readStations, readStation, readSources, readSource, readRecipe, RecipeError, SUPERSEDED } from "./registered.ts";
+export type { RegisteredFilter, Recipe } from "./registered.ts";
+export { orderFields, parseOrder, describeOrder, LOOP } from "./order.ts";
+export type { Order, OrderFields, OrderSource } from "./order.ts";
+export { intake, IntakeError, ENTRY_NOTE } from "./intake.ts";
+export type { IntakeRequest, IntakeResult } from "./intake.ts";
 export { processRunner } from "./runner.ts";
 export type { CommandRunner, CommandResult, CommandOptions } from "./runner.ts";
 export { systemClock } from "./clock.ts";

@@ -44,10 +44,10 @@ test("a human writes as the owner, a turn as owner/station and the expeditor as 
     { argv: ["bd", "--actor", "sona", "create", "order: training venues", "--type", "epic", "--labels", "loop", "--json"], ...CONNECTION },
   ]);
   assert.deepEqual(turn.runner.calls, [
-    { argv: ["bd", "--actor", "sona/grill", "create", "grill", "--parent", "kitchen-1", "--labels", "phase:grill", "--json"], ...CONNECTION },
+    { argv: ["bd", "--actor", "sona/grill", "create", "grill", "--parent", "kitchen-1", "--no-inherit-labels", "--labels", "phase:grill", "--json"], ...CONNECTION },
   ]);
   assert.deepEqual(expeditor.runner.calls, [
-    { argv: ["bd", "--actor", "sona/expeditor", "create", "turn failed: grill", "--parent", "kitchen-1", "--json"], ...CONNECTION },
+    { argv: ["bd", "--actor", "sona/expeditor", "create", "turn failed: grill", "--parent", "kitchen-1", "--no-inherit-labels", "--json"], ...CONNECTION },
   ]);
 });
 

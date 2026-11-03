@@ -2,6 +2,7 @@
 import type { Clock } from "./clock.ts";
 import type { CommandRunner } from "./runner.ts";
 import { init } from "./commands/init.ts";
+import { orderAdd } from "./commands/order-add.ts";
 import { recipeAdd } from "./commands/recipe-add.ts";
 import { sourceAdd } from "./commands/source-add.ts";
 import { stationAdd } from "./commands/station-add.ts";
@@ -29,7 +30,7 @@ export const COMMANDS: readonly CommandEntry[] = [
   { name: "init", summary: "Write this host's config and verify the connection to the space", run: init },
   { name: "up", summary: "Start this host's expeditor as a user service" },
   { name: "down", summary: "Stop this host's expeditor, leaving claimed phases reclaimable" },
-  { name: "order add", summary: "Add an order from a source URL, a file or a sentence" },
+  { name: "order add", summary: "Add an order from a source URL, a file or a sentence", run: orderAdd },
   { name: "recipe add", summary: "Register a recipe from a plugin directory, a file or a URL", run: recipeAdd },
   { name: "station add", summary: "Register a station on this host from a template and values", run: stationAdd },
   { name: "source add", summary: "Register a polled source with its kind, target, recipe and class", run: sourceAdd },

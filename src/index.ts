@@ -48,6 +48,8 @@ export { parsePass, readPasses, readOrders, nameOrder } from "./pass.ts";
 export type { Pass } from "./pass.ts";
 export { serviceUnit, SERVICE_NAME } from "./expeditor/service.ts";
 export type { ServiceUnit, ServiceSpec } from "./expeditor/service.ts";
+export { mergeGate, VERIFY_FILE } from "./merge-gate.ts";
+export type { MergeGateDeps } from "./merge-gate.ts";
 export { processRunner } from "./runner.ts";
 export type { CommandRunner, CommandResult, CommandOptions } from "./runner.ts";
 export { systemClock } from "./clock.ts";

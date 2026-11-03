@@ -7,7 +7,7 @@ import type { HostConfig } from "../config.ts";
 import { openSpace } from "../space.ts";
 import type { Space } from "../space.ts";
 
-export function openHostSpace(deps: CliDeps): { space: Space; config: HostConfig } | { error: string } {
+export function openHostSpace(deps: Pick<CliDeps, "runner" | "env">): { space: Space; config: HostConfig } | { error: string } {
   const config = readHostConfig(deps.env);
   if (!config) return { error: `no host config at ${hostConfigFile(deps.env)}: run kitchen init first` };
   const actor = resolveActor(deps.env, config);

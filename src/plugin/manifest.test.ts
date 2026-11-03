@@ -15,12 +15,12 @@ test("the manifest names the plugin kitchen, so the skill is reached as kitchen:
   assert.match(manifest.description, /turn driver/);
 });
 
-test("the plugin ships the turn skill and the Stop hook and nothing else: no commands, agents or phases", () => {
+test("the plugin ships the turn skill, the Stop hook and the two helpers (lay, merge gate) and nothing else: no commands, agents or phases", () => {
   const entries = fs.readdirSync(plugin).sort();
   assert.deepEqual(entries, [".claude-plugin", "bin", "hooks", "skills"]);
   assert.deepEqual(fs.readdirSync(path.join(plugin, "skills")), ["turn"]);
   assert.deepEqual(fs.readdirSync(path.join(plugin, "hooks")).sort(), ["hooks.json", "stop-guard.mjs"]);
-  assert.deepEqual(fs.readdirSync(path.join(plugin, "bin")), ["lay.mjs"]);
+  assert.deepEqual(fs.readdirSync(path.join(plugin, "bin")).sort(), ["lay.mjs", "merge-gate.mjs"]);
 });
 
 test("the hooks file registers the Stop hook alone, run with node from the plugin root", () => {

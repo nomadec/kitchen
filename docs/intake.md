@@ -1,6 +1,6 @@
-# Intake: `kitchen order add`
+# Intake: `kitchen order add` and the source poll
 
-Intake is how work enters the space. `kitchen order add` is one intake; the expeditor's source poll (a later slice) is the other, and both go through the same function, `intake` in `src/intake.ts`. Everything intake does is `bd` calls over the one command runner, so the tests script it from a table.
+Intake is how work enters the space. `kitchen order add` is one intake; the expeditor's source poll, the `sources` step of every tick, is the other, and both go through the same function, `intake` in `src/intake.ts`. Everything intake does is `bd` calls over the one command runner (and `gh` for an issue), so the tests script it from a table.
 
 ```sh
 kitchen order add https://github.com/nomadec/kitchen/issues/7 --recipe umka
@@ -62,4 +62,24 @@ When no station qualifies, the order is still created and intake lays a pass ins
 intake(space, { source, recipe, class, repos, owner })
 ```
 
-answers one of three results: `existing` with the orders found, `laid` with the order, the revision, the phase bead and the station, or `pass` with the order, the revision, the pass and the gap. `source` is the title, external reference, substring and text as read above; the source poll builds the same shape from a polled item and passes the class the source was registered with.
+answers one of three results: `existing` with the orders found, `laid` with the order, the revision, the phase bead and the station, or `pass` with the order, the revision, the pass and the gap. `source` is the title, external reference, substring and text as read above; the source poll builds the same shape from a polled item and passes the class the source was registered with. The reading of one item (an issue URL through `gh`, a file, free text) is `readItem` in `src/item.ts`, shared by the command and the poll.
+
+## The source poll
+
+Each tick, the `sources` step (`pollSources` in `src/expeditor/poll.ts`) reads the source beads whose `owner:` and `host:` labels are this host's config, with one `bd list --type source --label owner:<owner> --label host:<host>`. A source registered for another host is never listed here, so a source is polled by exactly one host and the cursor on its bead is the whole state of the poll. Each source is read since its cursor, oldest item first, and each item goes through `intake` with the source's recipe and the class it was registered with (never a class inferred from the item). The cursor is then set on the bead (`bd update <source> --notes` with the `cursor:` line replaced), after each item and not once at the end.
+
+The order of the two writes is the guarantee. The order bead is created first and the cursor advanced second, so a failure between them (the host dies, the server refuses the write) leaves the cursor where it was and the item is listed again on the next tick, where the duplicate check finds the order by its external reference, lays nothing, and advances the cursor past it. An item is never lost and never doubled. The same check is what makes re-listing harmless, so an item that already has an order, for any reason, is logged as `existing` and advances the cursor too. A source that fails stops at the item that failed, with the cursor where it was, and the tick goes on with the next source and the next step; the log line names the source, the item and the error.
+
+A `github` source lists the issues of its target repository updated since the cursor:
+
+```sh
+gh issue list --repo nomadec/kitchen --state all --limit 200 \
+  --search "sort:updated-asc updated:>=2026-01-02T10:00:00Z" \
+  --json number,title,body,url,updatedAt
+```
+
+An empty cursor lists every issue. The labels are not asked for: the class is the source's. The cursor is the `updatedAt` of each issue in turn. The search is `>=` and not `>`: an issue updated in the same second as the cursor is listed again rather than missed, and the duplicate check skips it. An issue updated after its order was laid (a comment, a label) is listed again for the same reason and skipped the same way. The title, body and URL come from the list itself, with `owner/repo/issues/n` as the substring for the duplicate check and the target repository as the order's one `repos:` entry.
+
+A `file` source reads a JSON Lines file by line offset: the cursor is the number of lines already behind it, `0` when empty. Each line is a JSON string holding one item as `kitchen order add` takes it, a GitHub issue URL, a file path or free text, read through `readItem` like the command's argument. A blank line, or one holding anything but a non-empty string, is no item: it is logged as dropped and the cursor passes it, so a stray line never wedges the source. Three lines and a cursor at `1` lay two orders and leave the cursor at `3`.
+
+Every item writes one log line under the `sources` step: the source, the item's external reference, the cursor it advanced to, and `order` with `laid` (the phase) or `pass`, or `existing` with the orders found. The step ends with the sources polled and the orders laid, and `kitchen up --foreground --once` prints the count as `laid N`.

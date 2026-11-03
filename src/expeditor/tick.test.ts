@@ -19,6 +19,8 @@ const SETTLED: ScriptedAnswer[] = [
   { command: "bd", args: [...EXPEDITOR, "list", "--type", "gate"], stdout: "[]" },
   { command: "bd", args: [...EXPEDITOR, "reclaim", "--json"], stdout: '{"count":0,"reclaimed":null,"schema_version":1,"scoped":false}' },
   { command: "bd", args: [...EXPEDITOR, "show"], stdout: '[{"id":"kitchen-21","status":"closed","issue_type":"task"}]' },
+  // No source is registered on this host in these tests; the poll has its own, poll.test.ts.
+  { command: "bd", args: [...EXPEDITOR, "list", "--type", "source"], stdout: "[]" },
 ];
 
 function kitchen(t: { after(fn: () => void): void }, table: readonly ScriptedAnswer[]) {
@@ -265,7 +267,7 @@ test("the turn's result line, the last line of its output, is appended as a comm
     assert.equal(line.tick, 1);
     assert.match(String(line.at), /^2026-01-01T00:00:00\.000Z$/);
   }
-  assert.match(String(k.log().find((line) => line.step === "sources")?.skipped), /a later slice/);
+  assert.deepEqual(k.log().find((line) => line.step === "sources")?.sources, [], "the poll ran and found no source on this host");
   assert.equal(k.log().find((line) => line.step === "gates")?.gates, "none open");
   assert.deepEqual(k.log().find((line) => line.step === "passes")?.applied, []);
   assert.deepEqual(k.log().find((line) => line.step === "leases")?.alive, [], "no turn lives yet at the first tick's leases step");

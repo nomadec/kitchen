@@ -17,6 +17,7 @@ const OVEN = ["--actor", "sona/oven"];
 /** Beneath every table: no gate open and no closed pass to apply (answers.test.ts scripts those). */
 const QUIET: ScriptedAnswer[] = [
   { command: "bd", args: [...EXPEDITOR, "gate", "check", "--json"], stdout: "No open gates found.\n" },
+  { command: "bd", args: [...EXPEDITOR, "list", "--type", "source"], stdout: "[]" },
   { command: "bd", args: [...EXPEDITOR, "list", "--type", "gate"], stdout: "[]" },
 ];
 
@@ -270,8 +271,8 @@ test("a stale lease found on tick is reclaimed and a phase's assignee restored f
 
   assert.equal(await k.run(), 0, k.err.join(""));
 
-  // After the stations, the gate check and the closed-pass list come the reclaim and the restores.
-  assert.deepEqual(k.bd().slice(3, 7), [
+  // After the stations, the gate check, the closed-pass list and the source list come the reclaim and the restores.
+  assert.deepEqual(k.bd().slice(4, 8), [
     [...EXPEDITOR, "reclaim", "--json"],
     [...EXPEDITOR, "show", "kitchen-31", "--json"],
     [...EXPEDITOR, "update", "kitchen-31", "--assignee", "sona/oven", "--json"],

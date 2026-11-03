@@ -12,8 +12,9 @@ import type { ScriptedAnswer } from "../testing/index.ts";
 
 const EXPEDITOR = ["--actor", "sona/expeditor"];
 
-/** Beneath every table: no stale lease to reclaim, and a phase read back after its turn is closed. */
+/** Beneath every table: no source to poll, no stale lease to reclaim, and a phase read back after its turn is closed. */
 const SETTLED: ScriptedAnswer[] = [
+  { command: "bd", args: [...EXPEDITOR, "list", "--type", "source"], stdout: "[]" },
   { command: "bd", args: [...EXPEDITOR, "reclaim", "--json"], stdout: '{"count":0,"reclaimed":null,"schema_version":1,"scoped":false}' },
   { command: "bd", args: [...EXPEDITOR, "show"], stdout: '[{"id":"kitchen-21","status":"closed","issue_type":"task"}]' },
 ];

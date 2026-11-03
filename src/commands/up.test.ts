@@ -99,6 +99,7 @@ test("kitchen down with no service installed, kitchen up on a host without kitch
 const QUIET_TICK: ScriptedAnswer[] = [
   { command: "bd", args: ["--actor", "sona/expeditor", "list", "--type", "station"], stdout: "[]" },
   { command: "bd", args: ["--actor", "sona/expeditor", "gate", "check", "--json"], stdout: "No open gates found.\n" },
+  { command: "bd", args: ["--actor", "sona/expeditor", "list", "--type", "source"], stdout: "[]" },
   { command: "bd", args: ["--actor", "sona/expeditor", "list", "--type", "gate"], stdout: "[]" },
   { command: "bd", args: ["--actor", "sona/expeditor", "reclaim", "--json"], stdout: '{"count":0,"reclaimed":null}' },
   { command: "bd", args: ["--actor", "sona/expeditor", "list", "--type", "epic"], stdout: "[]" },

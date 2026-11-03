@@ -119,7 +119,7 @@ class: unsorted
 cursor:
 ```
 
-The cursor is empty until the first poll; the expeditor sets it on the bead after each order it lays, so moving the source to another host (`--host`, or editing the label) loses nothing.
+The cursor is empty until the first poll; the expeditor sets it on the bead after each order it lays, so moving the source to another host (`--host`, or editing the label) loses nothing. For a `github` source it is the `updatedAt` of the last issue polled; for a `file` source it is the number of lines of the JSONL file already behind it. The poll itself, and why the cursor advances after each order and not before, is in `docs/intake.md`.
 
 ## Reading them back
 

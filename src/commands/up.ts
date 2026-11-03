@@ -71,7 +71,7 @@ async function foreground(deps: CliDeps, interval: number, once: boolean): Promi
     state.ticked(report.tick);
     const ends = await run.settle();
     state.stopped();
-    deps.stdout(`Tick ${report.tick}: started ${report.started.length}, waiting ${report.waiting.length}, ended ${ends.length}\n`);
+    deps.stdout(`Tick ${report.tick}: laid ${report.laid.length}, started ${report.started.length}, waiting ${report.waiting.length}, ended ${ends.length}\n`);
     return 0;
   }
   // `kitchen down` stops the service, which signals this process: the loop ends after the current

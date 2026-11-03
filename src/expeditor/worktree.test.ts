@@ -17,6 +17,7 @@ const PHASE_TEXT = (slug: string) =>
 /** Beneath every table: no gate open, no closed pass to apply, no stale lease to reclaim, and a phase read back after its turn is closed (answers.test.ts and lease.test.ts script the rest). */
 const SETTLED: ScriptedAnswer[] = [
   { command: "bd", args: [...EXPEDITOR, "gate", "check", "--json"], stdout: "No open gates found.\n" },
+  { command: "bd", args: [...EXPEDITOR, "list", "--type", "source"], stdout: "[]" },
   { command: "bd", args: [...EXPEDITOR, "list", "--type", "gate"], stdout: "[]" },
   { command: "bd", args: [...EXPEDITOR, "reclaim", "--json"], stdout: '{"count":0,"reclaimed":null,"schema_version":1,"scoped":false}' },
   { command: "bd", args: [...EXPEDITOR, "show"], stdout: '[{"id":"kitchen-21","status":"closed","issue_type":"task"}]' },

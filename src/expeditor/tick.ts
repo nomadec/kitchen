@@ -1,6 +1,5 @@
 // The tick: one pass of the expeditor over the work graph, as a sequence of named steps in the order
-// the spec lays them (Expeditor, ADR 0003). The step for source polling is named here and filled by a
-// later slice. The typed gates are evaluated by `bd gate check` and the word on a closed Kitchen-laid
+// the spec lays them (Expeditor, ADR 0003). The source poll lives in poll.ts. The typed gates are evaluated by `bd gate check` and the word on a closed Kitchen-laid
 // pass is applied (answers.ts) before anything is dispatched. The leases of the turns this host runs are
 // heartbeated by the turns themselves (turn.ts), on their own interval between ticks; the `leases`
 // step reports them and the `reclaim` step reverts the stale leases bd finds and restores each phase's
@@ -21,6 +20,7 @@ import type { Station } from "../station.ts";
 import { APPLIED, applyWord, kitchenLaid } from "./answers.ts";
 import type { TurnRunner } from "./claude.ts";
 import type { Log } from "./log.ts";
+import { pollSources } from "./poll.ts";
 import { endTurn, HEARTBEAT_INTERVAL_MS, startTurn, TURN_FAILED } from "./turn.ts";
 import type { Turn, TurnEnd } from "./turn.ts";
 import { removeWorktree, worktreeOrders, worktreePath } from "./worktree.ts";
@@ -46,6 +46,8 @@ export interface TickReport {
   started: Turn[];
   /** The phases on attended stations, left waiting for `kitchen turn`. */
   waiting: LaidPhase[];
+  /** The orders the source poll laid this tick, by id. */
+  laid: string[];
 }
 
 export interface Expeditor {
@@ -155,7 +157,15 @@ export function expeditor(deps: ExpeditorDeps): Expeditor {
       log(state.report.tick, "passes", { applied });
     },
 
-    sources: later("sources", "polling this host's sources"),
+    sources: async (state) => {
+      const polled = await pollSources({
+        space: state.space, runner: deps.runner, owner: state.config.owner, host: state.config.host,
+        log: (fields) => log(state.report.tick, "sources", fields),
+      });
+      state.report.laid.push(...polled.orders);
+      log(state.report.tick, "sources", { sources: polled.sources, orders: polled.orders });
+    },
+
     leases: async (state) => {
       // The turns heartbeat their own leases on the interval while their children live (turn.ts); the
       // tick reports the ones alive.
@@ -301,7 +311,7 @@ export function expeditor(deps: ExpeditorDeps): Expeditor {
   return {
     tick: async () => {
       const tick = ++count;
-      const report: TickReport = { tick, started: [], waiting: [] };
+      const report: TickReport = { tick, started: [], waiting: [], laid: [] };
       const config = readHostConfig(deps.env);
       if (!config) {
         log(tick, "config", { stopped: "no host config: run kitchen init first" });

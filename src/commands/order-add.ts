@@ -2,15 +2,13 @@
 // The command reads the source (gh for an issue), infers the class when none is given, and prints
 // what intake made: the order and its entry phase, the pass naming the gap, or the order that
 // already exists.
-import fs from "node:fs";
-import path from "node:path";
 import { parseArgs } from "node:util";
 import type { Command } from "../cli.ts";
 import { intake, IntakeError } from "../intake.ts";
+import { readItem } from "../item.ts";
+import type { ReadItem } from "../item.ts";
 import { describeOrder } from "../order.ts";
-import type { OrderSource } from "../order.ts";
 import { RecipeError } from "../registered.ts";
-import type { CommandRunner } from "../runner.ts";
 import { CLASSES, isOrderClass } from "../source.ts";
 import type { OrderClass } from "../source.ts";
 import { openHostSpace } from "./host-space.ts";
@@ -27,23 +25,6 @@ Options:
                     (default: a GitHub issue labelled bug is a bug, ready-for-agent a spec, any other a ticket; a file or text is an idea)
   --repo <slug>     A repository the order names, by remote slug (repeatable; default: the issue's repository)
 `;
-
-const GITHUB_ISSUE = /^https?:\/\/(?:www\.)?github\.com\/([^/\s]+)\/([^/\s]+)\/issues\/(\d+)\/?(?:[#?].*)?$/;
-
-/** What `gh issue view --json title,body,url,labels` prints. */
-interface IssueView {
-  title: string;
-  body: string;
-  url: string;
-  labels: { name: string }[];
-}
-
-/** The source as read, with the class it would enter with and the repositories it implies. */
-interface ReadSource {
-  source: OrderSource;
-  inferred: OrderClass;
-  repos: string[];
-}
 
 export const orderAdd: Command = async (args, deps) => {
   const fail = (message: string): number => {
@@ -70,9 +51,9 @@ export const orderAdd: Command = async (args, deps) => {
   if ("error" in opened) return fail(opened.error);
   const { space, config } = opened;
 
-  let read: ReadSource;
+  let read: ReadItem;
   try {
-    read = await readSource(target, deps.runner);
+    read = await readItem(target, deps.runner);
   } catch (error) {
     if (error instanceof IntakeError) return fail(error.message);
     throw error;
@@ -115,32 +96,4 @@ function parseOptions(args: readonly string[]) {
     strict: true,
   });
   return { target: positionals.join(" "), options: values };
-}
-
-/** Reads the source: a GitHub issue through gh, a file from disk, anything else as the sentence itself. */
-async function readSource(target: string, runner: CommandRunner): Promise<ReadSource> {
-  const issue = GITHUB_ISSUE.exec(target);
-  if (issue) {
-    const [, owner, repo, number] = issue;
-    const result = await runner(["gh", "issue", "view", target, "--json", "title,body,url,labels"]);
-    if (result.exitCode !== 0) throw new IntakeError(`gh issue view ${target} failed: ${result.stderr.trim()}`);
-    const view = JSON.parse(result.stdout) as IssueView;
-    const labels = view.labels.map((label) => label.name);
-    return {
-      source: { title: view.title, externalRef: view.url || target, externalContains: `${owner}/${repo}/issues/${number}`, text: view.body ?? "" },
-      inferred: labels.includes("bug") ? "bug" : labels.includes("ready-for-agent") ? "spec" : "ticket",
-      repos: [`${owner}/${repo}`],
-    };
-  }
-  if (fs.existsSync(target) && fs.statSync(target).isFile()) {
-    const file = path.resolve(target);
-    const text = fs.readFileSync(file, "utf8");
-    const heading = text.split("\n").map((line) => line.replace(/^#+\s*/, "").trim()).find(Boolean);
-    return {
-      source: { title: heading ?? path.basename(file), externalRef: `file:${file}`, externalContains: path.basename(file, path.extname(file)), text },
-      inferred: "idea",
-      repos: [],
-    };
-  }
-  return { source: { title: target, externalRef: `text:${target}`, externalContains: target, text: target }, inferred: "idea", repos: [] };
 }

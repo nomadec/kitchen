@@ -80,12 +80,22 @@ export const turn: Command = async (args, deps) => {
 
   // The writes at the end that are not the holder's (the result line, and what the shared handling adds) are the expeditor's, as in a tick.
   const expeditor = openSpace({ runner: deps.runner, env: deps.env, config, actor: expeditorActor(config.owner) });
-  const end = await endTurn({ expeditor, station: stationSpace }, start.turn);
-  if (end.exitCode !== 0) {
-    deps.stderr(`kitchen turn: the session exited ${end.exitCode}: ${phase.id} is a failed turn (${end.resultLine})\n`);
-    return end.exitCode;
+  const end = await endTurn(
+    {
+      expeditor,
+      station: stationSpace,
+      clock: deps.clock,
+      owner: config.owner,
+      onKill: (reason) => deps.stderr(`kitchen turn: ${phase.id} ${reason}\n`),
+    },
+    start.turn,
+  );
+  if (end.outcome === "failed") {
+    const pass = end.pass === undefined ? "" : `; laid the pass ${end.pass} for ${config.owner}`;
+    deps.stderr(`kitchen turn: ${end.failure}: ${phase.id} is a failed turn, failed:${end.failures} (${end.resultLine})${pass}\n`);
+    return end.exitCode === 0 ? 1 : end.exitCode;
   }
-  deps.stdout(`Turn ended: ${end.resultLine}\n`);
+  deps.stdout(`Turn ended: ${end.resultLine}${end.outcome === "reclaimed" ? ` (${phase.id} left open: reclaimed for ${phase.station})` : ""}\n`);
   return 0;
 };
 

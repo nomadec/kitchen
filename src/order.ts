@@ -53,6 +53,30 @@ export function orderFields(fields: OrderFields): CreateFields {
   };
 }
 
+/** One recipe the order pinned: the name and the `rev:<revision>` label. */
+export interface Pin {
+  name: string;
+  revision: string;
+}
+
+/**
+ * Every recipe the order pinned, from its `recipe:` note: `<name> <rev>` pairs separated by commas,
+ * the recipe it walks now first, the ones it crossed from after (an edge into another recipe adds a
+ * pin at the front and keeps the rest, so a path back finds its original revision).
+ */
+export function recipePins(notes: string): Pin[] {
+  return (noteLine(notes, "recipe") ?? "")
+    .split(",")
+    .map((pair) => pair.trim().split(/\s+/))
+    .filter((parts): parts is [string, string] => parts.length >= 2 && parts[0] !== "" && parts[1] !== "")
+    .map(([name, revision]) => ({ name, revision }));
+}
+
+/** The `recipe:` note value with a pin added at the front. */
+export function withPin(notes: string, pin: Pin): string {
+  return [pin, ...recipePins(notes)].map((p) => `${p.name} ${p.revision}`).join(", ");
+}
+
 /** The order a bead holds, as `bd list` or `bd show` printed it; a note it lacks leaves the field unset. */
 export function parseOrder(bead: Bead): Order {
   const notes = bead.notes ?? "";
@@ -63,11 +87,13 @@ export function parseOrder(bead: Bead): Order {
     repos: (noteLine(notes, "repos") ?? "").split(",").map((s) => s.trim()).filter(Boolean),
   };
   if (typeof bead.external_ref === "string" && bead.external_ref !== "") order.externalRef = bead.external_ref;
-  const recipe = noteLine(notes, "recipe");
-  if (recipe) {
-    const [name, revision] = recipe.split(/\s+/);
+  const [pin] = recipePins(notes);
+  if (pin) {
+    order.recipe = pin.name;
+    order.revision = pin.revision;
+  } else {
+    const name = noteLine(notes, "recipe")?.split(/\s+/)[0];
     if (name) order.recipe = name;
-    if (revision) order.revision = revision;
   }
   const cls = noteLine(notes, "class");
   if (cls && isOrderClass(cls)) order.class = cls;

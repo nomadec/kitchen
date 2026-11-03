@@ -79,6 +79,8 @@ export interface BeadFilter {
   /** The exact external reference, or a substring of it: the two duplicate checks of intake. */
   externalRef?: string;
   externalContains?: string;
+  /** Closed beads too: the children of an order a laying turn counts and dedupes against. */
+  all?: boolean;
 }
 
 export type ReadyFilter = BeadFilter;
@@ -284,6 +286,7 @@ export function openSpace(deps: SpaceDeps): Space {
         ...each("--exclude-label", filter.excludeLabels),
         ...flag("--external-ref", filter.externalRef),
         ...flag("--external-contains", filter.externalContains),
+        ...(filter.all ? ["--all"] : []),
         "--limit", "0",
       ]),
 

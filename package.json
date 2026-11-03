@@ -15,7 +15,8 @@
     "./testing": "./dist/testing/index.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "plugin"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",

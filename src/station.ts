@@ -50,6 +50,21 @@ export interface LaunchSpec {
   secrets: string[];
 }
 
+/** What a phase and its order need of a station mechanically: the model, and every repository checked out. */
+export interface Need {
+  model: string | undefined;
+  repos: readonly string[];
+}
+
+/** What the station lacks of the need: the model, each repository; empty when it qualifies (ADR 0002's one mechanical check). */
+export function lacks(station: Pick<Station, "launch">, need: Need): string[] {
+  const offered = station.launch.repositories.map((r) => r.slug);
+  return [
+    ...(need.model !== undefined && station.launch.models.includes(need.model) ? [] : [`model ${need.model ?? "(none)"}`]),
+    ...need.repos.filter((slug) => !offered.includes(slug)),
+  ];
+}
+
 /** The station's checkouts of the repositories an order names, in the order it names them; one it does not offer is left out. */
 export function offeredCheckouts(launch: LaunchSpec, repos: readonly string[]): { slug: string; path: string }[] {
   return repos.flatMap((slug) => launch.repositories.filter((r) => r.slug === slug));

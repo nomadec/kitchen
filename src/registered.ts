@@ -5,7 +5,7 @@ import { parsePhaseFile, PhaseError, splitTitle } from "./recipe/phase.ts";
 import type { Phase } from "./recipe/phase.ts";
 import { parseSource } from "./source.ts";
 import type { Source } from "./source.ts";
-import type { Space } from "./space.ts";
+import type { Bead, Space } from "./space.ts";
 import { parseStation } from "./station.ts";
 import type { Station } from "./station.ts";
 
@@ -32,8 +32,8 @@ export class RecipeError extends Error {
  * the recipe is not registered, when those beads span more than one revision (a registration that did
  * not finish), or when one of them does not parse.
  */
-export async function readRecipe(space: Space, name: string): Promise<Recipe> {
-  const beads = (await space.list({ type: "phase" })).filter(
+export async function readRecipe(space: Space, name: string, listed?: readonly Bead[]): Promise<Recipe> {
+  const beads = (listed ?? (await space.list({ type: "phase" }))).filter(
     (bead) => splitTitle(bead.title)?.recipe === name && !bead.labels?.includes(SUPERSEDED),
   );
   if (!beads.length) throw new RecipeError(`recipe ${name} is not registered: run kitchen recipe add first`);

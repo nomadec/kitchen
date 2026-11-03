@@ -38,6 +38,8 @@ export { ensureWorktree, removeWorktree, worktreeOrders, WorktreeError, PER_ORDE
 export type { Worktree, Checkout } from "./expeditor/worktree.ts";
 export { claudeRunner, turnPrompt, KITCHEN_TURN_SKILL } from "./expeditor/claude.ts";
 export type { TurnRunner, TurnRequest, TurnHandle, TurnMode, ClaudeRunnerDeps } from "./expeditor/claude.ts";
+export { lay, USAGE as LAY_USAGE, EXIT as LAY_EXIT } from "./turn/lay.ts";
+export type { LayDeps } from "./turn/lay.ts";
 export { openLog } from "./expeditor/log.ts";
 export type { Log } from "./expeditor/log.ts";
 export { readState, isStale } from "./expeditor/state.ts";

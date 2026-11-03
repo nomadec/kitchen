@@ -8,7 +8,8 @@ import type { Phase } from "./recipe/phase.ts";
 import { readRecipe, readStations } from "./registered.ts";
 import type { OrderClass } from "./source.ts";
 import type { Bead, Space } from "./space.ts";
-import type { Station } from "./station.ts";
+import { lacks } from "./station.ts";
+import type { Need, Station } from "./station.ts";
 
 /** The note intake writes on the entry phase: the one assignment no turn made. */
 export const ENTRY_NOTE = "entry: mechanical";
@@ -39,12 +40,6 @@ export class IntakeError extends Error {
     super(message);
     this.name = "IntakeError";
   }
-}
-
-/** What the entry phase and its order need of a station: the model, and every repository checked out. */
-interface Need {
-  model: string | undefined;
-  repos: readonly string[];
 }
 
 export async function intake(space: Space, request: IntakeRequest): Promise<IntakeResult> {
@@ -94,7 +89,7 @@ async function findExisting(space: Space, source: OrderSource): Promise<Order[]>
  * station, which a claim sets), then the order the space lists them in.
  */
 async function chooseStation(space: Space, stations: readonly Station[], need: Need): Promise<Station | undefined> {
-  const qualifying = stations.filter((station) => missing(station, need).length === 0);
+  const qualifying = stations.filter((station) => lacks(station, need).length === 0);
   if (qualifying.length === 0) return undefined;
   const load = new Map<string, number>();
   for (const station of qualifying) {
@@ -103,18 +98,9 @@ async function chooseStation(space: Space, stations: readonly Station[], need: N
   return [...qualifying].sort((a, b) => Number(a.attended) - Number(b.attended) || (load.get(a.id) ?? 0) - (load.get(b.id) ?? 0))[0];
 }
 
-/** What the station lacks of the need: the model, each repository; empty when it qualifies. */
-function missing(station: Station, need: Need): string[] {
-  const offered = station.launch.repositories.map((r) => r.slug);
-  return [
-    ...(need.model !== undefined && station.launch.models.includes(need.model) ? [] : [`model ${need.model ?? "(none)"}`]),
-    ...need.repos.filter((slug) => !offered.includes(slug)),
-  ];
-}
-
 /** The brief of the pass: what the phase needs and what each station of the owner lacks. */
 function describeGap(owner: string, phase: Phase, need: Need, stations: readonly Station[]): string {
   const needs = `${phase.slug} needs model ${need.model ?? "(none)"}${need.repos.length ? ` and ${need.repos.join(", ")} checked out` : ""}`;
   if (!stations.length) return `${needs}; ${owner} has no registered station`;
-  return `${needs}; ${stations.map((station) => `${station.title} lacks ${missing(station, need).join(", ")}`).join("; ")}`;
+  return `${needs}; ${stations.map((station) => `${station.title} lacks ${lacks(station, need).join(", ")}`).join("; ")}`;
 }

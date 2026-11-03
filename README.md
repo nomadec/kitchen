@@ -4,6 +4,46 @@ A runtime for agentic delivery on top of [beads](https://github.com/steveyegge/b
 
 Vocabulary is in `GLOSSARY.md`. Decisions are in `docs/adr/`.
 
+## Install
+
+Kitchen is the npm package `@nomadec/kitchen`, providing the `kitchen` command. It needs Node 24 and `bd` (beads 1.3.1) on the path.
+
+```sh
+npm install -g @nomadec/kitchen
+kitchen --help
+```
+
+From a clone:
+
+```sh
+npm install
+npm run build        # compiles src/ to dist/
+npm test             # node:test against a fake command runner; no bd or claude needed
+npm run typecheck
+node dist/bin/kitchen.js --help
+```
+
+Every external process Kitchen runs goes through one command runner (argv in; stdout, stderr and exit code out) and every read of the time through one clock. Tests inject a fake runner scripted from a table that records every call, plus a fake clock; both are exported from `@nomadec/kitchen/testing`.
+
+## `kitchen init`
+
+A new host is ready in one step. `kitchen init` writes the host config and verifies the connection to the space:
+
+```sh
+kitchen init --server rbn3:3307 --owner sona
+```
+
+| Option | Meaning | Default |
+| --- | --- | --- |
+| `--server <host:port>` | The Dolt SQL server the space lives on | required |
+| `--owner <name>` | The person this host belongs to; the human actor on every write | required |
+| `--database <name>` | The space's database on that server | `kitchen` |
+| `--user <name>` | The SQL user; one per person, shared with that person's stations | the owner |
+| `--credential <file>` | The beads credentials file whose `[host:port]` section holds the password | `~/.config/beads/credentials` |
+| `--host <name>` | This host's name, as stations registered here carry it | the hostname |
+
+The config lands in `$XDG_CONFIG_HOME/kitchen/config.json` (`~/.config/kitchen/config.json` by default) and holds the server, the credential reference, the owner and the host. No secret is written: the password stays in the beads credentials file the reference names. Next to it, `kitchen init` creates the beads workspace under `~/.config/kitchen/space` that every later `bd` command runs from, by running `bd init --server --external` against the configured server under the owner's actor. That call is the verification: when the server cannot be reached, `kitchen init` prints the command's stderr, exits non-zero and writes no config. Running `kitchen init` again re-initialises the existing workspace in place (local metadata only; the server's data is untouched) and a failed run never removes a workspace or a config that was already there.
+
 ## Primitives
 
 Each line names a Kitchen primitive and the beads feature under it. The glossary defines the Kitchen word; this list is where the mapping lives.

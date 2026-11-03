@@ -63,7 +63,7 @@ Each line names a Kitchen primitive and the beads feature under it. The glossary
 | Pass | A gate bead of type `human` | yes |
 | External wait | Gate beads of type `timer`, `gh:pr`, `gh:run`, `bead`, evaluated by `bd gate check` | yes |
 | Dependency | `bd dep`, blocking edges between laid phases | yes |
-| Actor | `--actor` on every write, in the audit trail | yes |
+| Actor | `--actor` on every write, in the audit trail; the rules are cooperative, see `docs/trust-model.md` | yes |
 | Activity | The events journal, `bd events` | yes |
 | Operational state | `bd set-state`, an event plus a label | later |
 | Worktree | `bd worktree` or Kitchen's own, one per order | yes |

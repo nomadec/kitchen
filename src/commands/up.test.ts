@@ -94,3 +94,34 @@ test("kitchen down with no service installed, kitchen up on a host without kitch
   assert.notEqual(await w.run("down"), 0);
   assert.match(w.err.at(-1) ?? "", /no user service manager for win32/);
 });
+
+/** A tick over an empty space: no stations on this host, nothing to reclaim, no order held. */
+const QUIET_TICK: ScriptedAnswer[] = [
+  { command: "bd", args: ["--actor", "sona/expeditor", "list", "--type", "station"], stdout: "[]" },
+  { command: "bd", args: ["--actor", "sona/expeditor", "reclaim", "--json"], stdout: '{"count":0,"reclaimed":null}' },
+  { command: "bd", args: ["--actor", "sona/expeditor", "list", "--type", "epic"], stdout: "[]" },
+];
+
+test("kitchen up --foreground keeps the expeditor's state file current: written after every tick with the tick count and the instant, and marked stopped when the service is told to stop", async (t) => {
+  const k = kitchen(t, QUIET_TICK);
+  const stateFile = path.join(k.home, ".local", "state", "kitchen", "expeditor.json");
+  const state = () => JSON.parse(fs.readFileSync(stateFile, "utf8")) as Record<string, unknown>;
+
+  const running = k.run("up", "--foreground", "--interval", "2");
+  for (let turns = 0; !fs.existsSync(stateFile) || (state().tick as number) < 2; turns++) {
+    assert.ok(turns < 1000, `no second tick recorded at ${stateFile}`);
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  const seen = state();
+  const tick = seen.tick as number;
+  assert.deepEqual(seen, {
+    pid: process.pid, owner: "sona", host: "sona-laptop", interval: 2,
+    started: "2026-01-01T00:00:00.000Z", tick, at: new Date(Date.UTC(2026, 0, 1, 0, 0, 2 * (tick - 1))).toISOString(),
+  }, "one tick every interval on the clock, the file written at each tick's end");
+
+  process.emit("SIGTERM");
+  assert.equal(await running, 0, k.err.join(""));
+  const stopped = state();
+  assert.equal(typeof stopped.stopped, "string", "the stop is recorded");
+  assert.ok((stopped.tick as number) >= tick);
+});

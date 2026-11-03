@@ -5,10 +5,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import type { CliDeps, Command } from "../cli.ts";
-import { expeditorLogFile, hostConfigFile, readHostConfig } from "../config.ts";
+import { expeditorLogFile, expeditorStateFile, hostConfigFile, readHostConfig } from "../config.ts";
 import { claudeRunner } from "../expeditor/claude.ts";
 import { openLog } from "../expeditor/log.ts";
 import { DEFAULT_INTERVAL } from "../expeditor/service.ts";
+import { expeditorState } from "../expeditor/state.ts";
 import { expeditor } from "../expeditor/tick.ts";
 import { runEach, unitFor } from "./service-unit.ts";
 
@@ -78,11 +79,15 @@ async function foreground(deps: CliDeps, interval: number, once: boolean): Promi
   process.once("SIGTERM", stop);
   process.once("SIGINT", stop);
   log.write({ step: "start", interval, host: config.host, owner: config.owner });
+  // What kitchen status reads: the pid, the last tick and its instant, and the stop when it is clean.
+  const state = expeditorState(expeditorStateFile(deps.env), deps.clock, { pid: process.pid, owner: config.owner, host: config.host, interval });
   while (!stopping) {
-    await run.tick();
+    const report = await run.tick();
+    state.ticked(report.tick);
     await deps.clock.sleep(interval * 1000);
   }
   log.write({ step: "stop" });
+  state.stopped();
   return 0;
 }
 

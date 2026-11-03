@@ -60,6 +60,11 @@ export function expeditorLogFile(env: Env): string {
   return path.join(kitchenStateDir(env), "expeditor.jsonl");
 }
 
+/** The state file of this host's expeditor: the running process's pid, its last tick and when it stopped. */
+export function expeditorStateFile(env: Env): string {
+  return path.join(kitchenStateDir(env), "expeditor.json");
+}
+
 /** The host config `kitchen init` wrote, or undefined when this host has none yet. */
 export function readHostConfig(env: Env): HostConfig | undefined {
   const file = hostConfigFile(env);

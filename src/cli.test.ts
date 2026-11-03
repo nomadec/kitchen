@@ -39,13 +39,14 @@ function kitchen() {
   return { run: (...argv: string[]) => main(argv, deps), runner, err };
 }
 
-test("a v1 command this release does not implement yet says so, issues nothing and exits non-zero", async () => {
+test("every v1 command is implemented: each is reached by name, answering --help with its usage or refusing it in its own voice, and issues nothing", async () => {
   const k = kitchen();
-  assert.notEqual(await k.run("status"), 0);
-  assert.match(k.err.join(""), /kitchen status is not implemented yet/);
-  assert.notEqual(await k.run("pass"), 0);
-  assert.match(k.err.join(""), /kitchen pass is not implemented yet/);
-  assert.deepEqual(k.runner.calls, []);
+  for (const name of V1_COMMANDS) {
+    const before = k.err.length;
+    const code = await k.run(...name.split(" "), "--help");
+    assert.ok(code === 0 || k.err.slice(before).join("").startsWith(`kitchen ${name}:`), `${name}: ${k.err.slice(before).join("")}`);
+  }
+  assert.equal(k.runner.calls.length, 0);
 });
 
 test("an unknown command is refused with the help, and a bare group names its subcommand", async () => {

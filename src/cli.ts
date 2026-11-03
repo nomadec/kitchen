@@ -9,6 +9,7 @@ import { pass } from "./commands/pass.ts";
 import { recipeAdd } from "./commands/recipe-add.ts";
 import { sourceAdd } from "./commands/source-add.ts";
 import { stationAdd } from "./commands/station-add.ts";
+import { status } from "./commands/status.ts";
 import { turn } from "./commands/turn.ts";
 import { up } from "./commands/up.ts";
 
@@ -40,7 +41,7 @@ export type Command = (args: readonly string[], deps: CliDeps) => Promise<number
 interface CommandEntry {
   name: string;
   summary: string;
-  run?: Command;
+  run: Command;
 }
 
 /** The v1 commands, in the order `kitchen --help` lists them. Nothing else. */
@@ -54,7 +55,7 @@ export const COMMANDS: readonly CommandEntry[] = [
   { name: "source add", summary: "Register a polled source with its kind, target, recipe and class", run: sourceAdd },
   { name: "turn", summary: "Run one waiting phase on an attended station in this terminal", run: turn },
   { name: "pass", summary: "List briefed passes and close one with your word", run: pass },
-  { name: "status", summary: "Show the expeditor, running turns, waiting phases, open passes and caps" },
+  { name: "status", summary: "Show the expeditor, running turns, waiting phases, open passes and caps", run: status },
 ];
 
 export function help(): string {
@@ -79,10 +80,6 @@ export async function main(argv: readonly string[], deps: CliDeps): Promise<numb
     const group = COMMANDS.filter((c) => c.name.startsWith(`${first} `)).map((c) => `kitchen ${c.name}`);
     const hint = group.length ? `kitchen ${first} needs a subcommand: ${group.join(", ")}` : `unknown command: ${first}`;
     deps.stderr(`kitchen: ${hint}\n\n${help()}`);
-    return 1;
-  }
-  if (!match.run) {
-    deps.stderr(`kitchen ${match.name} is not implemented yet.\n`);
     return 1;
   }
   const rest = argv.slice(match.name.split(" ").length);

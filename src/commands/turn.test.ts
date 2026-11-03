@@ -15,12 +15,13 @@ const EXPEDITOR = ["--actor", "sona/expeditor"];
 const DESK = ["--actor", "sona/desk"];
 const PROMPT = (phase: string) => `Invoke the Skill tool with skill "kitchen:turn" and args "${phase}"`;
 
-/** Beneath every table: the phase read back after the session is closed. The failed-turn test scripts an open one. */
+/** Beneath every table: the order read back after a closed phase is still open (the session closed the phase, not the order), and the phase read back after the session is closed. The failed-turn test scripts an open phase. */
+const ORDER_OPEN_AFTER: ScriptedAnswer = { command: "bd", args: [...EXPEDITOR, "show", "kitchen-20"], stdout: '[{"id":"kitchen-20","status":"in_progress","issue_type":"epic","assignee":"sona/desk"}]' };
 const CLOSED_AFTER: ScriptedAnswer = { command: "bd", args: [...EXPEDITOR, "show"], stdout: '[{"id":"kitchen-21","status":"closed","issue_type":"task"}]' };
 
 function kitchen(t: { after(fn: () => void): void }, table: readonly ScriptedAnswer[], options: HostOptions = {}) {
   // Added to the test's own array, which the fake runner reads at call time, so rows a test pushes after this still count.
-  if (!table.includes(CLOSED_AFTER)) (table as ScriptedAnswer[]).push(CLOSED_AFTER);
+  if (!table.includes(CLOSED_AFTER)) (table as ScriptedAnswer[]).push(ORDER_OPEN_AFTER, CLOSED_AFTER);
   const host = initialisedHost(t, table, options);
   const run = (...argv: string[]) => main(["turn", ...argv], host.deps);
   /** Every bd call's argv after `bd`, actor included. */
@@ -179,7 +180,7 @@ test("an order naming a repository the station offers gets its worktree between 
   assert.equal(await k.run("kitchen-21"), 0, k.err.join(""));
 
   const sequence = k.runner.calls.map((c) => (c.argv[0] === "git" ? `git ${c.argv[3]}` : c.argv[0] === "claude" ? "claude" : c.argv[3] === "update" ? `update ${c.argv[4]}` : c.argv[3]));
-  assert.deepEqual(sequence.slice(3), ["update kitchen-20", "git fetch", "git rev-parse", "git rev-parse", "git worktree", "git config", "git config", "git config", "git config", "update kitchen-21", "claude", "comments", "show", "update kitchen-20"]);
+  assert.deepEqual(sequence.slice(3), ["update kitchen-20", "git fetch", "git rev-parse", "git rev-parse", "git worktree", "git config", "git config", "git config", "git config", "update kitchen-21", "claude", "comments", "show", "show", "update kitchen-20"]);
   assert.equal(k.claude()[0]?.cwd, worktree);
   assert.equal(k.claude()[0]?.stdio, "inherit");
 });

@@ -144,9 +144,11 @@ export interface EndTurnDeps {
 /**
  * Keeps the leases alive and the wall clock watched until the session ends, comments its result line
  * on the phase, settles the phase (closed, reclaimed or failed) and releases the order, whatever
- * happened before.
+ * happened before, except when the turn closed the order itself: that close is the take's end.
  */
 export async function endTurn(deps: EndTurnDeps, turn: Turn): Promise<TurnEnd> {
+  const order = { id: turn.order.id, issue_type: "epic" };
+  let releaseOrder = true;
   try {
     const ended = new AbortController();
     const lease = keepLease(deps, turn, ended.signal);
@@ -158,7 +160,12 @@ export async function endTurn(deps: EndTurnDeps, turn: Turn): Promise<TurnEnd> {
     const resultLine = lastLine(result.stdout) ?? `exit ${result.exitCode}`;
     await deps.expeditor.comment(turn.phase.id, resultLine);
     const phase = await deps.expeditor.show(turn.phase.id);
-    if (phase.status === "closed") return { resultLine, exitCode: result.exitCode, outcome: "closed" };
+    if (phase.status === "closed") {
+      // The turn that closes the order (`Order done: ...`) ended the take with that close; the release,
+      // which sets the order open again, would undo it. A closed order holds nothing and stays closed.
+      releaseOrder = (await deps.expeditor.show(order.id)).status !== "closed";
+      return { resultLine, exitCode: result.exitCode, outcome: "closed" };
+    }
     // Left open: the station's claim is released and the phase goes back to the station it was laid for.
     await deps.station.release(phase);
     const failure = failureOf(result, killed);
@@ -173,7 +180,7 @@ export async function endTurn(deps: EndTurnDeps, turn: Turn): Promise<TurnEnd> {
     if (count >= FAILURES_BEFORE_PASS) end.pass = await layTurnFailedPass(deps, turn, phase, { count, failure, resultLine });
     return end;
   } finally {
-    await deps.station.release({ id: turn.order.id, issue_type: "epic" });
+    if (releaseOrder) await deps.station.release(order);
   }
 }
 

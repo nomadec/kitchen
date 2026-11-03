@@ -9,9 +9,15 @@ import type { CliDeps } from "../cli.ts";
 import { fakeClock, fakeRunner, TEST_PROGRAM } from "../testing/index.ts";
 import type { ScriptedAnswer } from "../testing/index.ts";
 
+/** The beads credentials file: one `[host:port]` section per server, in both spellings bd reads. */
+const CREDENTIALS = "# servers\n[rbn3:3307]\npassword = the-rbn3-secret\n\n[10.0.0.5:3306]\npassword=team-secret\n\n[gone:3307]\npassword = gone\n";
+
 function kitchen(t: { after(fn: () => void): void }, table: readonly ScriptedAnswer[]) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "kitchen-init-"));
   t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  // The default credentials file under the config root; a test that names another writes its own.
+  fs.mkdirSync(path.join(home, ".config", "beads"), { recursive: true });
+  fs.writeFileSync(path.join(home, ".config", "beads", "credentials"), CREDENTIALS);
   const out: string[] = [];
   const err: string[] = [];
   const runner = fakeRunner(table);
@@ -26,20 +32,24 @@ function kitchen(t: { after(fn: () => void): void }, table: readonly ScriptedAns
   };
   const configDir = path.join(home, ".config", "kitchen");
   const run = (...argv: string[]) => main(argv, deps);
-  return { run, runner, out, err, configDir, configFile: path.join(configDir, "config.json") };
+  return { home, run, runner, out, err, configDir, configFile: path.join(configDir, "config.json") };
 }
 
 const VERIFY_OK: ScriptedAnswer = { command: "bd", args: ["--actor", "sona", "init"] };
 
 test("kitchen init writes the host config and verifies the connection with one bd call under the human actor", async (t) => {
   const k = kitchen(t, [VERIFY_OK]);
+  // bd init reads the server password from BEADS_DOLT_PASSWORD only (the credentials file serves every
+  // later command), so the init call carries the section's password; the config never holds it.
+  const credential = path.join(k.home, "credentials");
+  fs.writeFileSync(credential, CREDENTIALS);
 
-  const code = await k.run("init", "--server", "rbn3:3307", "--owner", "sona", "--credential", "/home/sona/.config/beads/credentials");
+  const code = await k.run("init", "--server", "rbn3:3307", "--owner", "sona", "--credential", credential);
 
   assert.equal(code, 0, k.err.join(""));
   assert.deepEqual(JSON.parse(fs.readFileSync(k.configFile, "utf8")), {
     server: { host: "rbn3", port: 3307, user: "sona", database: "kitchen" },
-    credential: "/home/sona/.config/beads/credentials",
+    credential,
     owner: "sona",
     host: "sona-laptop",
   });
@@ -53,11 +63,23 @@ test("kitchen init writes the host config and verifies the connection with one b
         "--non-interactive", "--quiet",
       ],
       cwd: path.join(k.configDir, "space"),
-      env: { BEADS_CREDENTIALS_FILE: "/home/sona/.config/beads/credentials" },
+      env: { BEADS_CREDENTIALS_FILE: credential, BEADS_DOLT_PASSWORD: "the-rbn3-secret" },
     },
   ]);
   assert.match(k.out.join(""), /Connected to rbn3:3307 as sona/);
   assert.match(k.out.join(""), new RegExp(k.configFile));
+});
+
+test("kitchen init refuses a credentials file without the server's section, before any command is issued", async (t) => {
+  const k = kitchen(t, []);
+
+  assert.notEqual(await k.run("init", "--server", "rbn3:3308", "--owner", "sona"), 0);
+  assert.match(k.err.join(""), /\[rbn3:3308\]/);
+  assert.match(k.err.join(""), new RegExp(path.join(k.home, ".config", "beads", "credentials")));
+  assert.notEqual(await k.run("init", "--server", "rbn3:3307", "--owner", "sona", "--credential", path.join(k.home, "absent")), 0);
+  assert.match(k.err.join(""), /absent/);
+  assert.deepEqual(k.runner.calls, []);
+  assert.equal(fs.existsSync(k.configFile), false);
 });
 
 test("kitchen init takes the database, SQL user and host name as options", async (t) => {

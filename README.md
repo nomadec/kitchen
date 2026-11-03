@@ -25,6 +25,25 @@ node dist/bin/kitchen.js --help
 
 Every external process Kitchen runs goes through one command runner (argv in; stdout, stderr and exit code out) and every read of the time through one clock. Tests inject a fake runner scripted from a table that records every call, plus a fake clock; both are exported from `@nomadec/kitchen/testing`.
 
+The published package (`npm pack` from a built clone) holds `dist/`, the CLI with the expeditor and the UI bundle under `dist/ui/`, and `plugin/`, the Claude Code plugin the runner loads; nothing else, and no recipe. Before a release, run the smoke below by hand and write its run record into `docs/qa/issue-1-spec-review.md`.
+
+## The commands
+
+The CLI has these ten commands and nothing else (spec: Human surfaces). Each answers `--help`; each has its section below.
+
+| Command | What it does |
+| --- | --- |
+| `kitchen init` | Write this host's config and verify the connection to the space |
+| `kitchen up` | Start this host's expeditor as a user service (`--foreground` runs it here, `--once` one tick) |
+| `kitchen down` | Stop the expeditor, leaving claimed phases reclaimable |
+| `kitchen order add` | Add an order from a GitHub issue URL, a file or a sentence |
+| `kitchen recipe add` | Register a recipe from a plugin directory, a file or a URL |
+| `kitchen station add` | Register a station on this host from a template and the values only this host knows |
+| `kitchen source add` | Register a polled source with its kind, target, recipe and class |
+| `kitchen turn` | Run one waiting phase on an attended station in this terminal |
+| `kitchen pass` | List briefed passes and close one with your word |
+| `kitchen status` | Show the expeditor, running turns, waiting phases, open passes and caps |
+
 ## `kitchen init`
 
 A new host is ready in one step. `kitchen init` writes the host config and verifies the connection to the space:
@@ -42,7 +61,11 @@ kitchen init --server rbn3:3307 --owner sona
 | `--credential <file>` | The beads credentials file whose `[host:port]` section holds the password | `~/.config/beads/credentials` |
 | `--host <name>` | This host's name, as stations registered here carry it | the hostname |
 
-The config lands in `$XDG_CONFIG_HOME/kitchen/config.json` (`~/.config/kitchen/config.json` by default) and holds the server, the credential reference, the owner and the host. No secret is written: the password stays in the beads credentials file the reference names. Next to it, `kitchen init` creates the beads workspace under `~/.config/kitchen/space` that every later `bd` command runs from, by running `bd init --server --external` against the configured server under the owner's actor. That call is the verification: when the server cannot be reached, `kitchen init` prints the command's stderr, exits non-zero and writes no config. Running `kitchen init` again re-initialises the existing workspace in place (local metadata only; the server's data is untouched) and a failed run never removes a workspace or a config that was already there.
+The config lands in `$XDG_CONFIG_HOME/kitchen/config.json` (`~/.config/kitchen/config.json` by default) and holds the server, the credential reference, the owner and the host. No secret is written: the password stays in the beads credentials file the reference names. Next to it, `kitchen init` creates the beads workspace under `~/.config/kitchen/space` that every later `bd` command runs from, by running `bd init --server --external` against the configured server under the owner's actor. bd 1.3.1 reads the credentials file for every command after that one, but `bd init` itself takes the password from `BEADS_DOLT_PASSWORD` only, so `kitchen init` reads the `[host:port]` section of the file and passes its password to that one call in its environment; a file or a section that is missing is refused before any command is issued. That call is the verification: when the server cannot be reached, `kitchen init` prints the command's stderr, exits non-zero and writes no config. A database that does not exist on the server yet is created by it, which is how the smoke gets a database of its own. Running `kitchen init` again re-initialises the existing workspace in place (local metadata only; the server's data is untouched) and a failed run never removes a workspace or a config that was already there.
+
+## `kitchen recipe add`
+
+`kitchen recipe add <plugin-dir|file|url> [--recipe <name>]` registers a recipe (glossary: Recipe, Revision): the phase files under the plugin's `phases/` directory (the recipe named by `.claude-plugin/plugin.json`), a directory of phase files, one file, or one fetched from a URL (`--recipe` names the recipe for a file or a URL). The bundle is linted together with the latest revision of every other recipe in the space: symmetric `from` and `to`, every target registered in this bundle or in another recipe, `rounds`, `model` and `budget` well-formed (a scalar or token-count budget is refused), exactly one entry phase per class the bundle claims, an entry phase without `needs`, a pass phase (`skill: human`) with an `ask`; the whole bundle is refused on any finding, before any `bd` write. On success one bead of type `phase` per file is created, titled `<recipe>/<slug>`, labelled `rev:<revision>` (a short hash of the files), with the file as its description, and the previous revision's beads are labelled `superseded`. Laid phases are untouched; an order pins the revision it entered with. An unchanged bundle registers nothing. After a registration, regenerate `docs/phase-graph.md` (below).
 
 ## `kitchen station add` and `kitchen source add`
 
@@ -126,6 +149,27 @@ node scripts/phase-graph.ts > docs/phase-graph.md
 ```
 
 The script is not a CLI command; it reads the space with `bd list` and `bd show` under the owner's actor and writes nothing to it.
+
+## The trust model
+
+Who writes as whom is provenance, not a lock. A person writes as their name, a turn as `<owner>/<station>`, the expeditor as `<owner>/expeditor`, each as `--actor` on every `bd` write. Kitchen's `bd` wrapper, CLI and UI refuse, under a station actor, writes to beads of type `phase`, `station` and `source` and the closing of a pass. That is the whole promise, and its limit is plain: every person and their stations share that person's one SQL credential, beads treats the actor as provenance and not as authenticated identity, and a station that reaches `bd`, the HTTP API or the database directly, or passes `--actor <owner>` itself, is not stopped. Cooperative, not a security boundary: `docs/trust-model.md` says where it stops and ADR 0003 records the decision.
+
+## The smoke
+
+One smoke, run by hand before a release, proves the loop against a real `bd` and a real `claude` (spec story 81). From a built clone, with a server and a SQL user allowed to create a throwaway database:
+
+```sh
+npm run build
+node scripts/smoke.ts --server rbn3:3307 --user sona --credential ~/.config/beads/credentials
+```
+
+It creates a database of its own on the server (`kitchen_smoke_<stamp>`, through `kitchen init` under a config and state directory of the run's own, so this host's kitchen config is untouched), registers a recipe from a plugin directory (`--plugin`; the fixture under `scripts/smoke-fixture` by default: an entry phase `greet` for an idea, the pass `approve` and the phase `confirm` behind it; the Umka plugin's directory once its migration has landed), registers one unattended station on this host from the plugin's `station.json` (else the fixture's), adds one synthetic order of class `idea` (`--class` for another), and runs the expeditor tick by tick (`kitchen up --foreground --once`) within `--minutes`. It asserts that the order reaches its first pass with a brief, laid and assigned by a turn; that `kitchen pass` under a station actor is refused and the pass closes only under the human actor; that the phase behind the pass runs and applies the word (`--word`, `go` by default) once, with the pass labelled `applied` and a further tick starting nothing; and that the order closes with its result line. It prints the bead ids it created, the expeditor log and one run-record row per check, PASS, FAIL or BLOCKED (a check that cannot run on this host, such as a `claude` that is not signed in), and exits 0 only when every check passed. The database is left on the server for the record and dropped by hand.
+
+For a host without a team server, a throwaway Dolt SQL server does: `DOLT_ROOT_HOST=% DOLT_ROOT_PASSWORD=<pw> dolt sql-server --host 127.0.0.1 --port 3399` in an empty directory, a credentials file with a `[127.0.0.1:3399]` section, then `--server 127.0.0.1:3399 --user root`.
+
+On a host where `claude` is not signed in, `PATH=scripts/smoke-standin:$PATH` puts a stand-in `claude` in front of the real one: a shell script that does, mechanically, what the turn driver asks for the fixture's two worked phases through the lay helper. It proves the harness (every `bd` write and read, the expeditor, `kitchen pass`, the answer applied once) and nothing about the turn driver's prose; a release still needs the real run.
+
+The run record goes into `docs/qa/issue-1-spec-review.md`, which also lists the hand-run journeys beyond the smoke.
 
 ## Primitives
 

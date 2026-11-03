@@ -107,6 +107,7 @@ test("while the child runs, the phase and its order are heartbeated as the stati
     turn("kitchen-21 closed\n", { lasts: 2.5 * MINUTE }),
     commented("kitchen-21"),
     shown(phase("kitchen-21", "kitchen-20", "reproduce", "oven", { status: "closed" })),
+    shown({ id: "kitchen-20", title: "Stale cookie", status: "in_progress", issue_type: "epic", assignee: "sona/oven" }),
     released("oven", "kitchen-20"),
   ]);
 
@@ -237,6 +238,41 @@ test("a child that exits clean without closing its phase has the phase reclaimed
   ]);
   const end = k.log().find((line) => line.step === "turn");
   assert.deepEqual({ exit: end?.exit, outcome: end?.outcome, failures: end?.failures }, { exit: 0, outcome: "reclaimed", failures: undefined });
+});
+
+test("a turn that closes its order with the result line leaves the order closed: the take is not released, since the release would open it again", async (t) => {
+  const k = kitchen(t, [
+    ...oneTurn(phase("kitchen-21", "kitchen-20", "merge", "oven")),
+    turn("Order done: https://github.com/nomadec/kitchen/pull/7\n"),
+    commented("kitchen-21"),
+    shown(phase("kitchen-21", "kitchen-20", "merge", "oven", { status: "closed" })),
+    shown({ id: "kitchen-20", title: "Stale cookie", status: "closed", issue_type: "epic", close_reason: "Order done: https://github.com/nomadec/kitchen/pull/7" }),
+  ]);
+
+  assert.equal(await k.run(), 0, k.err.join(""));
+
+  assert.deepEqual(k.bd().slice(-2), [
+    [...EXPEDITOR, "show", "kitchen-21", "--json"],
+    [...EXPEDITOR, "show", "kitchen-20", "--json"],
+  ]);
+  assert.ok(!k.bd().some((argv) => argv.includes("kitchen-20") && argv.includes("--status")), "no write sets the closed order's status");
+  const end = k.log().find((line) => line.step === "turn");
+  assert.deepEqual({ exit: end?.exit, outcome: end?.outcome, result: end?.result }, { exit: 0, outcome: "closed", result: "Order done: https://github.com/nomadec/kitchen/pull/7" });
+});
+
+test("a turn that closes its phase but not its order has the order released, as on every other path", async (t) => {
+  const k = kitchen(t, [
+    ...oneTurn(phase("kitchen-21", "kitchen-20", "reproduce", "oven")),
+    turn("kitchen-21 closed: a reproduction\n"),
+    commented("kitchen-21"),
+    shown(phase("kitchen-21", "kitchen-20", "reproduce", "oven", { status: "closed" })),
+    shown({ id: "kitchen-20", title: "Stale cookie", status: "in_progress", issue_type: "epic", assignee: "sona/oven" }),
+    released("oven", "kitchen-20"),
+  ]);
+
+  assert.equal(await k.run(), 0, k.err.join(""));
+
+  assert.deepEqual(k.bd().at(-1), [...OVEN, "update", "kitchen-20", "--status", "open", "--assignee", "", "--json"], "the take is released last");
 });
 
 test("a budget overrun the harness reports counts as a failure even on a clean exit", async (t) => {

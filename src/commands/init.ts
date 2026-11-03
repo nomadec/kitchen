@@ -27,6 +27,15 @@ export const init: Command = async (args, deps) => {
   const config = parsed.config;
   const { server } = config;
 
+  // bd 1.3.1 reads the credentials file for every command after init, but bd init itself takes the
+  // server password from BEADS_DOLT_PASSWORD only: the init call carries the section's password in
+  // its environment and nothing else does. A file or section that is missing is refused here.
+  const password = credentialPassword(config.credential, `${server.host}:${server.port}`);
+  if ("error" in password) {
+    deps.stderr(`kitchen init: ${password.error}\n`);
+    return 1;
+  }
+
   // The beads workspace every later bd command runs from. An existing one is re-initialised in place
   // (local metadata only; the server's data is untouched) and is never removed by a failed run.
   const space = spaceDir(deps.env);
@@ -41,7 +50,7 @@ export const init: Command = async (args, deps) => {
       "--non-interactive", "--quiet",
       ...(spaceExisted ? ["--reinit-local"] : []),
     ],
-    { cwd: space, env: { BEADS_CREDENTIALS_FILE: config.credential } },
+    { cwd: space, env: { BEADS_CREDENTIALS_FILE: config.credential, BEADS_DOLT_PASSWORD: password.password } },
   );
   if (verification.exitCode !== 0) {
     if (!spaceExisted) fs.rmSync(space, { recursive: true, force: true });
@@ -94,6 +103,27 @@ function parseOptions(
       host: values.host ?? hostname,
     },
   };
+}
+
+/**
+ * The password of the `[host:port]` section of a beads credentials file: INI lines, `password=` or
+ * `password = `, `#` comments. bd's own format (docs/architecture/dolt.md in beads).
+ */
+function credentialPassword(file: string, section: string): { password: string } | { error: string } {
+  if (!fs.existsSync(file)) return { error: `no credentials file at ${file}: put the password of [${section}] there (docs/onboarding.md)` };
+  let current: string | undefined;
+  for (const raw of fs.readFileSync(file, "utf8").split("\n")) {
+    const line = raw.trim();
+    if (line === "" || line.startsWith("#")) continue;
+    const header = /^\[(.+)\]$/.exec(line);
+    if (header) {
+      current = header[1];
+      continue;
+    }
+    const entry = /^password\s*=\s*(.*)$/.exec(line);
+    if (current === section && entry && entry[1] !== undefined) return { password: entry[1].trim() };
+  }
+  return { error: `${file} has no [${section}] section with a password: bd reads the server's password from it` };
 }
 
 function parseAddress(text: string): { host: string; port: number } | undefined {

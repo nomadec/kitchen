@@ -168,3 +168,36 @@ Copy this section for each QA run. Link detailed evidence or follow-up issues wh
 | 9. Umka migration | NOT RUN | |
 | 10. Merge verification | NOT RUN | |
 | Minimum integration coverage | NOT RUN | |
+
+## Run record: the smoke, 2026-11-03
+
+The hand-run smoke, `node scripts/smoke.ts` (README, The smoke), on the development host, twice: once against the real `claude`, which is not signed in on this host, and once with the stand-in `claude` shipped under `scripts/smoke-standin` first on the path, a shell script that does what the `kitchen:turn` skill asks for the fixture's two worked phases, through the lay helper under the station actor. The second run proves the harness (every `bd` write and read, the expeditor, `kitchen pass`, the answer applied once) and nothing about the turn driver's prose; the first is the release gate and stays BLOCKED until a signed-in `claude` runs it.
+
+- Date: 2026-11-03
+- Kitchen revision: `9dc3b67` (this slice's first commit on `altcode/ALT-160`, as the smoke's header printed) with the review changes in the working tree at run time; the final commit is recorded on the slice's task
+- Recipe revision: the smoke fixture `scripts/smoke-fixture`, `smoke rev:5dcf53d` (three phases: `greet`, the pass `approve`, `confirm`); the migrated Umka plugin was not available (story 79 lives in nomadec/marketplace)
+- Tool versions: bd 1.3.1 (c1c4b642a), claude 2.1.316 (Claude Code), Node v24.21.0, Dolt 2.6.2 as a throwaway `dolt sql-server` on 127.0.0.1:3399
+- Test space, repositories, hosts, and stations: one database per run on that server (`kitchen_smoke_20261103_083810` real claude; `kitchen_smoke_20261103_083833` stand-in), no repository (the fixture's station offers none, so the order touches no code), host `bos-umid-kushayev-paperclip-rbn3`, owner `smoke`, one unattended station `smoke/smoke` (cap 1, timeout 10m)
+- Recorded spec interpretations: "assigned by a turn" is read from the beads: the pass and the phase behind it carry the station title as `created_by` and the phase an `assigned:` note. "Applies the answer once" is read as the pass labelled `applied`, one `answer:` line on the order, one turn on the phase behind in the expeditor log, and a further tick starting nothing. A check the host cannot run (no `claude` login) is BLOCKED, not FAIL.
+
+Two defects the real `bd` surfaced, both fixed in this slice with a fake-runner test each: `bd init` ignores the credentials file and takes the password from `BEADS_DOLT_PASSWORD` only, so `kitchen init` could not reach any server with a password (it now reads the `[host:port]` section and passes the password to that one call); and the take's release at the end of a turn (`--status open`) reopened an order the turn had just closed with `Order done:` (the release is now skipped when the order is closed). Also noted: `bd list` hides gates unless asked for `--type gate` (or `--include-gates`), which Kitchen's own reads already do.
+
+Real `claude` (database `kitchen_smoke_20261103_083810`): checks 1 to 4 PASS (phase beads kitchen-1yh, kitchen-eqx, kitchen-tyg; station kitchen-jgt; order kitchen-a3g; entry phase kitchen-a3g.1 assigned `entry: mechanical`); check 5 BLOCKED: both turns exited 1 with `Not logged in · Please run /login`, the second failure laid the `turn failed: greet` pass kitchen-4f4 for the owner and no third turn started; checks 6 to 9 not reached.
+
+Stand-in `claude` (database `kitchen_smoke_20261103_083833`): all nine checks PASS. Phase beads kitchen-20s, kitchen-90e, kitchen-di9; station kitchen-cv7; order kitchen-pou; entry kitchen-pou.1 closed by the first turn; pass kitchen-c1w (`approve`, created by `smoke/smoke`, brief present) blocking kitchen-pou.2 (`confirm`, created and assigned by the turn with an `assigned:` note); `kitchen pass kitchen-c1w go` under `BEADS_ACTOR=smoke/smoke` refused with exit 1 naming the cooperative rule, the pass still open; the same under the owner closed it with `go`; the next tick ran kitchen-pou.2 once, the pass labelled `applied`, one `answer: go` line, a further tick started nothing; the order closed with `Order done: smoke, no pull request`.
+
+| Check | Result | Evidence / bead IDs / follow-up |
+| --- | --- | --- |
+| 1. First-turn startup | PASS (first box) | An order added by hand with an explicit recipe reached its entry phase, assigned to the one eligible station without a phase laid by hand: kitchen-a3g.1 and kitchen-pou.1 (`entry: mechanical`). The other boxes (a registered source, no qualifying station, other classes) NOT RUN |
+| 2. Claims and recovery | PASS (first and last box), others NOT RUN | The take and the claim under the station actor, the lease held while the child lived (expeditor log, both runs); the second failed turn laid `turn failed: greet` kitchen-4f4 and no third turn started (real-claude run). Kill, restart and competing dispatch NOT RUN |
+| 3. Attended interaction | NOT RUN | The smoke's station is unattended by design |
+| 4. Human-answer continuation | PASS with the stand-in; BLOCKED with the real `claude` | Pass kitchen-c1w answered through the CLI, the continuation kitchen-pou.2 ran on the next tick and applied the word once (label `applied`, one `answer:` line, one turn, a further tick idle). The UI path, a redirecting answer and the Kitchen-laid passes (rounds cap, no station) NOT RUN |
+| 5. Cross-host coordination | NOT RUN | One host |
+| 6. Station handoffs | NOT RUN | The order names no repository |
+| 7. Human-only trust boundary | PASS (third box) | `kitchen pass` under the station actor refused before any `bd` call, naming the cooperative rule and `docs/trust-model.md`; the owner's close succeeded. Registration under a station actor, and the limit statement, are covered by unit tests and `docs/trust-model.md`; not re-run by hand |
+| 8. Recipe update semantics | NOT RUN | One revision registered |
+| 9. Umka migration | BLOCKED | The migrated plugin is not on this host; the smoke takes any plugin directory (`--plugin`) and will run against it as it is |
+| 10. Merge verification | NOT RUN | No code, no pull request |
+| Minimum integration coverage | PASS (first journey) with the stand-in; BLOCKED with the real `claude` | Register recipe and station, add an order, reach a briefed pass, answer as a human, observe the continuation: the smoke's checks 2 to 8. The other three journeys NOT RUN |
+
+Unblock: sign `claude` in on the host (`claude /login`, or an `ANTHROPIC_API_KEY` the CLI accepts) and run `node scripts/smoke.ts` again; the run record is complete when the real-`claude` row of checks 5 to 9 reads PASS.

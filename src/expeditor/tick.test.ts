@@ -13,11 +13,13 @@ import type { ScriptedAnswer } from "../testing/index.ts";
 const EXPEDITOR = ["--actor", "sona/expeditor"];
 const PROMPT = (phase: string) => `Invoke the Skill tool with skill "kitchen:turn" and args "${phase}"`;
 
-/** Beneath every table: no gate open, no closed pass to apply, no stale lease to reclaim, and a phase read back after its turn is closed. The answers and lease tests script the rest. */
+/** Beneath every table: no gate open, no closed pass to apply, no stale lease to reclaim, and a phase read back after its turn is closed with its order still open (the turn closed the phase, not the order). The answers and lease tests script the rest. */
 const SETTLED: ScriptedAnswer[] = [
   { command: "bd", args: [...EXPEDITOR, "gate", "check", "--json"], stdout: "No open gates found.\n" },
   { command: "bd", args: [...EXPEDITOR, "list", "--type", "gate"], stdout: "[]" },
   { command: "bd", args: [...EXPEDITOR, "reclaim", "--json"], stdout: '{"count":0,"reclaimed":null,"schema_version":1,"scoped":false}' },
+  { command: "bd", args: [...EXPEDITOR, "show", "kitchen-20"], stdout: '[{"id":"kitchen-20","status":"in_progress","issue_type":"epic","assignee":"sona/oven"}]' },
+  { command: "bd", args: [...EXPEDITOR, "show", "kitchen-50"], stdout: '[{"id":"kitchen-50","status":"in_progress","issue_type":"epic","assignee":"sona/oven"}]' },
   { command: "bd", args: [...EXPEDITOR, "show"], stdout: '[{"id":"kitchen-21","status":"closed","issue_type":"task"}]' },
   // No source is registered on this host in these tests; the poll has its own, poll.test.ts.
   { command: "bd", args: [...EXPEDITOR, "list", "--type", "source"], stdout: "[]" },

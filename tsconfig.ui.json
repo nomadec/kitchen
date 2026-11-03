@@ -1,0 +1,8 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": ["es2024", "dom", "dom.iterable"],
+    "noEmit": true
+  },
+  "include": ["ui/**/*.ts", "src/actor.ts", "src/fields.ts", "src/laid.ts", "src/order.ts", "src/pass.ts", "src/recipe/phase.ts", "src/source.ts", "src/station.ts"]
+}

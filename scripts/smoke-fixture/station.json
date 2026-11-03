@@ -1,0 +1,12 @@
+{
+  "name": "smoke",
+  "offers": "nothing checked out; the smoke recipe's phases, which touch no code; sonnet",
+  "provider": "claude",
+  "models": ["claude-sonnet-5"],
+  "auth": "subscription",
+  "plugins": [],
+  "skills": [],
+  "repositories": [],
+  "worktrees": "per-order",
+  "budget": { "usd": 1, "effort": "low" }
+}

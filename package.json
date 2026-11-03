@@ -1,0 +1,31 @@
+{
+  "name": "@nomadec/kitchen",
+  "version": "0.1.0",
+  "description": "A runtime for agentic delivery on beads: one space, registered recipes and stations, an expeditor per host, and passes where humans decide.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "bin": {
+    "kitchen": "dist/bin/kitchen.js"
+  },
+  "exports": {
+    ".": "./dist/index.js",
+    "./testing": "./dist/testing/index.js"
+  },
+  "files": [
+    "dist",
+    "plugin"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json && esbuild ui/app.ts ui/index.html --bundle --format=esm --platform=browser --target=es2022 --outdir=dist/ui --loader:.html=copy --sourcemap",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.ui.json --noEmit",
+    "test": "node --test \"src/**/*.test.ts\" \"scripts/**/*.test.ts\" \"ui/**/*.test.ts\""
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "esbuild": "^0.28.2",
+    "typescript": "^5.9.0"
+  }
+}

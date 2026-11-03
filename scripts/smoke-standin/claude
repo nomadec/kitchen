@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# A stand-in for claude, for exercising the smoke harness only (scripts/smoke.ts) on a host where
+# claude is not signed in: put this directory first on the PATH and the expeditor spawns it in place
+# of the real CLI. It is not a model and proves nothing about the turn driver's prose. It does,
+# mechanically, what plugin/skills/turn/SKILL.md asks a session to do for the two worked phases of
+# the fixture recipe (scripts/smoke-fixture): greet lays the phase behind the pass, then the pass,
+# then closes itself; confirm applies the person's word from the closed pass once (the Apply section
+# of approve.md), labels the pass applied, writes its line and closes the phase and the order. Every
+# write goes through the lay helper, as the station actor the expeditor put in BEADS_ACTOR; the reads
+# are bd --json. Any other phase is refused with exit 1.
+set -euo pipefail
+if [ "${1:-}" = "--version" ]; then echo "stand-in claude (scripts/smoke-standin: the smoke harness only)"; exit 0; fi
+PLUGIN=""
+PROMPT=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --plugin-dir) [ -z "$PLUGIN" ] && PLUGIN="$2"; shift 2;;
+    --model|--effort|--max-budget-usd) shift 2;;
+    --print|--dangerously-skip-permissions) shift;;
+    *) PROMPT="$1"; shift;;
+  esac
+done
+PHASE=$(printf '%s' "$PROMPT" | sed -n 's/.*args "\([^"]*\)".*/\1/p')
+LAY="node $PLUGIN/bin/lay.mjs"
+bead() { bd show "$1" --json | jq -r "$2"; }
+
+# 1. Claim: the phase is this session's.
+ASSIGNEE=$(bead "$PHASE" '.[0].assignee')
+STATUS=$(bead "$PHASE" '.[0].status')
+if [ "$ASSIGNEE" != "$BEADS_ACTOR" ] || [ "$STATUS" != "in_progress" ]; then echo "$PHASE busy: claimed by $ASSIGNEE"; exit 0; fi
+ORDER=$(bead "$PHASE" '.[0].parent')
+SLUG=$(bead "$PHASE" '.[0].labels[] | select(startswith("phase:")) | sub("phase:";"")')
+case "$SLUG" in
+  greet)
+    # 3. Work: the greeting on the order. 4. Close out: the phase behind the pass, then the pass, then the close.
+    DESC=$(bead "$ORDER" '.[0].description')
+    $LAY note "$ORDER" greeting "Hello from the smoke: $DESC" >&2
+    BEHIND=$($LAY phase "$ORDER" confirm --station "$BEADS_ACTOR" --why "the only station; it lists sonnet and the order names no repository" --note "when: always; greet done" | sed -n 's/.* as \([^ ]*\) .*/\1/p')
+    [ -n "$BEHIND" ] || { echo "$PHASE: lay phase answered no id" >&2; exit 1; }
+    printf 'approve\nA greeting was put on the order.\nMay the greeting be confirmed? Recommended answer: go.\nEvidence: %s\nTo answer: kitchen pass, or the Pass view.\n' "$ORDER" | $LAY pass "$ORDER" approve --blocks "$BEHIND" --brief - >&2
+    $LAY close "$PHASE" --reason "greeting: Hello from the smoke" >&2
+    echo "$PHASE closed: a greeting line is on the order; approve waits for the person"
+    ;;
+  confirm)
+    # 2. Reconcile: the closed, unapplied pass this phase is blocked by gets its Apply section run once.
+    for PASS in $(bd show "$PHASE" --json | jq -r '.[0].dependencies[]? | select(.issue_type=="gate" and .status=="closed") | .id'); do
+      if ! bd show "$PASS" --json | jq -e '.[0].labels // [] | index("applied")' >/dev/null; then
+        WORD=$(bead "$PASS" '.[0].close_reason')
+        $LAY note "$ORDER" answer "$WORD" >&2
+        $LAY label "$PASS" applied >&2
+      fi
+    done
+    # 3. Work and 4. Close out: the confirmed line, the phase, then the order with its result line.
+    WORD=$(bead "$ORDER" '.[0].notes' | sed -n 's/^answer: //p')
+    GREETING=$(bead "$ORDER" '.[0].notes' | sed -n 's/^greeting: //p')
+    $LAY note "$ORDER" confirmed "$WORD, on: $GREETING" >&2
+    $LAY close "$PHASE" --reason "confirmed: $WORD" >&2
+    $LAY close "$ORDER" --reason "Order done: smoke, no pull request" >&2
+    echo "Order done: smoke, no pull request"
+    ;;
+  *) echo "$PHASE: the stand-in knows no phase $SLUG" >&2; exit 1;;
+esac

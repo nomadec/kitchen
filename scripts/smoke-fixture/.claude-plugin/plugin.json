@@ -1,0 +1,5 @@
+{
+  "name": "smoke",
+  "version": "0.1.0",
+  "description": "The fixture recipe of Kitchen's hand-run smoke: an entry phase, a pass and the phase behind it. Registered with kitchen recipe add scripts/smoke-fixture; no content skill, the phase bodies are the work."
+}

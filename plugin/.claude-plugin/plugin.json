@@ -1,0 +1,14 @@
+{
+  "name": "kitchen",
+  "version": "0.1.0",
+  "description": "The Kitchen turn driver: the kitchen:turn skill that works one phase of one order in a fresh session, and the Stop hook that keeps the session alive while a command it started still runs. No phases, no content skills; recipes are registered into the space with kitchen recipe add.",
+  "author": {
+    "name": "nomadec"
+  },
+  "repository": "https://github.com/nomadec/kitchen",
+  "keywords": [
+    "beads",
+    "turn",
+    "delivery"
+  ]
+}

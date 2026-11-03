@@ -168,6 +168,48 @@ test("the result line of an attended turn comes from the result: note the driver
   assert.match(k.out.at(-1) ?? "", /^Turn ended: kitchen-21 closed: a proposal at docs\/proposals\/venue\.md\n$/);
 });
 
+test("a result: note left by an earlier turn of the phase is not this turn's result: the claim answers the note as it was, and a session that printed nothing with the same note is commented as its exit", async (t) => {
+  const stale = "model: claude-opus-5\nresult: kitchen-21 open: stopped at the second question";
+  const k = kitchen(t, [
+    ...ONE_TURN.slice(0, 4),
+    claimed("kitchen-21", {}, { notes: stale }),
+    session(),
+    { command: "bd", args: [...EXPEDITOR, "show", "kitchen-21"], stdout: JSON.stringify([{ id: "kitchen-21", title: "grill: Stale cookie", status: "in_progress", issue_type: "task", assignee: "sona/desk", labels: ["phase:grill", "station:sona/desk"], notes: stale }]) },
+    commented("kitchen-21"),
+    { command: "bd", args: [...DESK, "update", "kitchen-21"], stdout: "[]" },
+    released("kitchen-20"),
+  ]);
+
+  assert.equal(await k.run("kitchen-21"), 0, k.err.join(""));
+
+  assert.deepEqual(k.writes()[2], [...EXPEDITOR, "comments", "add", "kitchen-21", "exit 0", "--json"]);
+  assert.match(k.out.at(-1) ?? "", /^Turn ended: exit 0 \(kitchen-21 left open: reclaimed for sona\/desk\)\n$/);
+
+  // The same claim answer, and a note the driver rewrote during the session: that line is the result.
+  const rewritten = kitchen(t, [
+    ...ONE_TURN.slice(0, 4),
+    claimed("kitchen-21", {}, { notes: stale }),
+    session(),
+    { command: "bd", args: [...EXPEDITOR, "show", "kitchen-21"], stdout: JSON.stringify([{ id: "kitchen-21", title: "grill: Stale cookie", status: "closed", issue_type: "task", notes: "model: claude-opus-5\nresult: kitchen-21 closed: a proposal at docs/proposals/venue.md" }]) },
+    commented("kitchen-21"),
+    released("kitchen-20"),
+  ]);
+  assert.equal(await rewritten.run("kitchen-21"), 0, rewritten.err.join(""));
+  assert.deepEqual(rewritten.writes()[2], [...EXPEDITOR, "comments", "add", "kitchen-21", "kitchen-21 closed: a proposal at docs/proposals/venue.md", "--json"]);
+});
+
+test("a session that ended but could not be settled (bd answering no bead to the show that follows it) is reported as a line and exits 1, not thrown at the terminal; the claim and the take are bd reclaim's", async (t) => {
+  const k = kitchen(t, [
+    ...ONE_TURN.slice(0, 6),
+    { command: "bd", args: [...EXPEDITOR, "show", "kitchen-21"], stdout: "[]" },
+    released("kitchen-20"),
+  ]);
+
+  assert.equal(await k.run("kitchen-21"), 1);
+
+  assert.equal(k.err.at(-1), "kitchen turn: kitchen-21 ended but could not be settled: bd show kitchen-21 answered with no bead; its claim and the take of kitchen-20 are bd reclaim's once their leases go stale\n");
+});
+
 test("a second ready phase of an order this station's turn holds is refused before the take: one turn per order, held in the space", async (t) => {
   const k = kitchen(t, [
     shown(phase("kitchen-22", "kitchen-20", "sona/desk")),

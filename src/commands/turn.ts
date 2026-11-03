@@ -11,6 +11,7 @@ import type { Command } from "../cli.ts";
 import type { HostConfig } from "../config.ts";
 import { claudeRunner } from "../expeditor/claude.ts";
 import { endTurn, startTurn } from "../expeditor/turn.ts";
+import type { TurnEnd } from "../expeditor/turn.ts";
 import { parseActor } from "../actor.ts";
 import { parseLaidPhase, LaidPhaseError } from "../laid.ts";
 import type { LaidPhase } from "../laid.ts";
@@ -81,16 +82,24 @@ export const turn: Command = async (args, deps) => {
 
   // The writes at the end that are not the holder's (the result line, and what the shared handling adds) are the expeditor's, as in a tick.
   const expeditor = openSpace({ runner: deps.runner, env: deps.env, config, actor: expeditorActor(config.owner) });
-  const end = await endTurn(
-    {
-      expeditor,
-      station: stationSpace,
-      clock: deps.clock,
-      owner: config.owner,
-      onKill: (reason) => deps.stderr(`kitchen turn: ${phase.id} ${reason}\n`),
-    },
-    start.turn,
-  );
+  let end: TurnEnd;
+  try {
+    end = await endTurn(
+      {
+        expeditor,
+        station: stationSpace,
+        clock: deps.clock,
+        owner: config.owner,
+        onKill: (reason) => deps.stderr(`kitchen turn: ${phase.id} ${reason}\n`),
+      },
+      start.turn,
+    );
+  } catch (error) {
+    // The session ended but its settling did not (a bd call refused or answering nothing): said as a
+    // line, as a tick logs it, and the phase and its take are bd reclaim's once their leases go stale.
+    const failed = error instanceof Error ? error.message : String(error);
+    return fail(`${phase.id} ended but could not be settled: ${failed}; its claim and the take of ${phase.order} are bd reclaim's once their leases go stale`);
+  }
   if (end.outcome === "failed") {
     const pass = end.pass === undefined ? "" : `; laid the pass ${end.pass} for ${config.owner}`;
     deps.stderr(`kitchen turn: ${end.failure}: ${phase.id} is a failed turn, failed:${end.failures} (${end.resultLine})${pass}\n`);

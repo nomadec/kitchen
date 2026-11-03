@@ -130,7 +130,17 @@ async function serve(deps: CliDeps, config: HostConfig, log: Log, port: number):
   void api.done.then((result) => {
     if (!stopped) log.write({ step: "serve", ended: `bd serve exited ${result.exitCode}`, stderr: result.stderr.trim() });
   });
-  const ui = await startUi({ uiDir: deps.program.uiDir, owner: config.owner, host: config.host, port, api: api.url });
+  let ui: Awaited<ReturnType<typeof startUi>>;
+  try {
+    ui = await startUi({ uiDir: deps.program.uiDir, owner: config.owner, host: config.host, port, api: api.url });
+  } catch (error) {
+    // A listen refused (the UI port taken) ends the run: bd serve, already running, is stopped with it,
+    // since a child left behind would hold the API port and keep this process alive.
+    stopped = true;
+    api.stop();
+    await api.done;
+    throw error;
+  }
   log.write({ step: "serve", ui: ui.url, api: api.url, token: api.tokenFile });
   return {
     stop: async () => {

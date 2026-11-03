@@ -3,6 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import net from "node:net";
 import path from "node:path";
 import { main } from "../cli.ts";
 import { initialisedHost } from "../testing/index.ts";
@@ -171,6 +172,28 @@ test("the running expeditor serves bd serve on loopback with a token file it own
   assert.ok(serve.signal.aborted, "bd serve is stopped with the expeditor");
   await assert.rejects(fetch(`${served.ui}/me`), "the UI server is closed once the expeditor has exited");
   assert.deepEqual(log().at(-1), { at: log().at(-1)?.at, step: "serve", stopped: true });
+});
+
+test("a UI port something else listens on ends kitchen up --foreground with the refusal, and the bd serve already started is stopped with it: no child is left holding the API port", async (t) => {
+  const k = kitchen(t, QUIET_TICK);
+  const logFile = path.join(k.home, ".local", "state", "kitchen", "expeditor.jsonl");
+  const log = (): Record<string, unknown>[] =>
+    fs.existsSync(logFile) ? fs.readFileSync(logFile, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>) : [];
+  const taken = net.createServer();
+  await new Promise<void>((resolve) => taken.listen(0, "127.0.0.1", resolve));
+  t.after(() => taken.close());
+  const address = taken.address();
+  const port = typeof address === "object" && address ? address.port : 0;
+
+  assert.equal(await k.run("up", "--foreground", "--port", String(port)), 1);
+
+  assert.match(k.err.at(-1) ?? "", /^kitchen up: could not serve: listen EADDRINUSE/);
+  const serve = k.runner.calls.find((c) => c.argv[0] === "bd" && c.argv[1] === "serve");
+  assert.ok(serve, "bd serve was started before the UI listened");
+  assert.ok(serve.signal instanceof AbortSignal && serve.signal.aborted, "bd serve is stopped when the UI cannot listen");
+  const failed = log().find((line) => line.step === "serve" && line.failed);
+  assert.match(failed?.failed as string, /EADDRINUSE/);
+  assert.ok(!log().some((line) => line.step === "serve" && typeof line.ui === "string"), "nothing is logged as served");
 });
 
 test("kitchen up --foreground --once runs one tick and serves nothing: no bd serve, no UI port", async (t) => {

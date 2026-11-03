@@ -286,7 +286,7 @@ export function expeditor(deps: ExpeditorDeps): Expeditor {
         const start = await startTurn({ station: stationSpace, runner: deps.turnRunner, git: deps.runner }, station, phase, "headless");
         if (start.kind !== "started") {
           const dropped = start.kind === "held" ? `order held by ${start.by}` : start.kind === "claimed" ? `phase claimed by ${start.by}` : start.reason;
-          log(state.report.tick, "dispatch", { phase: phase.id, order: phase.order, dropped });
+          log(state.report.tick, "dispatch", { phase: phase.id, order: phase.order, station: station.title, dropped });
           continue;
         }
         state.held.set(phase.order, station.title);

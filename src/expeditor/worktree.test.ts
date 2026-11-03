@@ -135,13 +135,13 @@ test("the hooks directory is written under the checkout with every client-side h
   assert.equal(await k.run(), 0, k.err.join(""));
 
   const dir = path.join(k.checkouts.kitchen, ".kitchen", "hooks");
-  assert.deepEqual(fs.readdirSync(dir).sort(), [...FORWARDED_HOOKS].sort());
+  assert.deepEqual(fs.readdirSync(dir).sort(), [...FORWARDED_HOOKS].sort(), "every hook and nothing else: each is staged under a temporary name and renamed into place");
   for (const name of ["pre-commit", "commit-msg", "pre-push"]) {
     const hook = path.join(dir, name);
     assert.ok(fs.statSync(hook).mode & 0o100, `${name} is executable by its owner`);
     const text = fs.readFileSync(hook, "utf8");
     assert.match(text, /^#!\/bin\/sh\n/);
-    assert.match(text, /git config --file "\$common\/config" core\.hooksPath .* --global core\.hooksPath .* --system core\.hooksPath .* echo "\$common\/hooks"/, "the repository's own hooks directory: its core.hooksPath, then the global one, then the system one");
+    assert.match(text, /git config --type=path --file "\$common\/config" core\.hooksPath .* --type=path --global core\.hooksPath .* --type=path --system core\.hooksPath .* echo "\$common\/hooks"/, "the repository's own hooks directory: its core.hooksPath, then the global one, then the system one, each read as a path so a ~/ value is expanded");
     assert.doesNotMatch(text, /case "\$hooks"/, "a relative core.hooksPath stays relative to the working tree root git runs the hook from");
     assert.match(text, /"\$hooks\/\$name" "\$@" \|\| exit \$\?/, "the repository's hook of the same name runs, and its refusal is the worktree's");
     assert.doesNotMatch(text, /interpret-trailers/);

@@ -57,14 +57,14 @@ export const FORWARDED_HOOKS: readonly string[] = [
 /**
  * The lines every hook under `.kitchen/hooks` starts with: find the repository's own hooks directory
  * (its `core.hooksPath` in the repository's config, else the global one, else the system one, else
- * `.git/hooks`; a relative path stays relative, since git runs a hook from the root of the working
- * tree and reads a relative `core.hooksPath` from there) and run the hook of the same name there when
- * it exists.
+ * `.git/hooks`; read as a path, so a `~/` value is expanded as git expands it, while a relative path
+ * stays relative, since git runs a hook from the root of the working tree and reads a relative
+ * `core.hooksPath` from there) and run the hook of the same name there when it exists.
  */
 const FORWARD = `#!/bin/sh
 # Kitchen: runs the repository's own hook of this name, so the worktree keeps every hook the project or beads installed.
 common="$(git rev-parse --git-common-dir)"
-hooks="$(git config --file "$common/config" core.hooksPath 2>/dev/null || git config --global core.hooksPath 2>/dev/null || git config --system core.hooksPath 2>/dev/null || echo "$common/hooks")"
+hooks="$(git config --type=path --file "$common/config" core.hooksPath 2>/dev/null || git config --type=path --global core.hooksPath 2>/dev/null || git config --type=path --system core.hooksPath 2>/dev/null || echo "$common/hooks")"
 name="$(basename "$0")"
 if [ -x "$hooks/$name" ]; then "$hooks/$name" "$@" || exit $?; fi
 `;
@@ -124,12 +124,18 @@ export async function removeWorktree(runner: CommandRunner, checkout: string, or
   return target;
 }
 
-/** Writes the forwarding hooks and the trailer hook under the checkout's `.kitchen/hooks`. */
+/**
+ * Writes the forwarding hooks and the trailer hook under the checkout's `.kitchen/hooks`. The directory
+ * is shared by every worktree of the checkout and written on every turn, so each hook lands by a rename:
+ * a commit of another turn reading it meanwhile sees the whole old file or the whole new one.
+ */
 function writeTrailerHook(checkout: string): void {
   const dir = hooksPath(checkout);
   fs.mkdirSync(dir, { recursive: true });
   for (const name of FORWARDED_HOOKS) {
-    fs.writeFileSync(path.join(dir, name), name === "prepare-commit-msg" ? TRAILER_HOOK : FORWARD, { mode: 0o755 });
+    const staged = path.join(dir, `.${name}.${process.pid}.tmp`);
+    fs.writeFileSync(staged, name === "prepare-commit-msg" ? TRAILER_HOOK : FORWARD, { mode: 0o755 });
+    fs.renameSync(staged, path.join(dir, name));
   }
 }
 

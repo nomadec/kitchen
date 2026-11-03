@@ -95,9 +95,11 @@ test("kitchen down with no service installed, kitchen up on a host without kitch
   assert.match(w.err.at(-1) ?? "", /no user service manager for win32/);
 });
 
-/** A tick over an empty space: no stations on this host, nothing to reclaim, no order held. */
+/** A tick over an empty space: no stations on this host, no gate open, no closed pass to apply, nothing to reclaim, no order held. */
 const QUIET_TICK: ScriptedAnswer[] = [
   { command: "bd", args: ["--actor", "sona/expeditor", "list", "--type", "station"], stdout: "[]" },
+  { command: "bd", args: ["--actor", "sona/expeditor", "gate", "check", "--json"], stdout: "No open gates found.\n" },
+  { command: "bd", args: ["--actor", "sona/expeditor", "list", "--type", "gate"], stdout: "[]" },
   { command: "bd", args: ["--actor", "sona/expeditor", "reclaim", "--json"], stdout: '{"count":0,"reclaimed":null}' },
   { command: "bd", args: ["--actor", "sona/expeditor", "list", "--type", "epic"], stdout: "[]" },
 ];

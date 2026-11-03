@@ -13,6 +13,7 @@ Each line names a Kitchen primitive and the beads feature under it. The glossary
 | Space | One Dolt database behind `bd` server mode, one SQL user per person | yes |
 | Order | An epic bead with a source reference, a repository note and a class | yes |
 | Phase, registered | A bead of custom type `phase` holding the phase file | yes |
+| Revision | A `rev:<revision>` label on the registered phase beads, named in the order's `recipe:` note | yes |
 | Phase, laid | A child task bead of the order, assigned to a station, blocked by what must finish first | yes |
 | Station | A bead of custom type `station` holding the launch spec | yes |
 | Source | A bead of custom type `source` holding the cursor | yes |

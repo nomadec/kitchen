@@ -1,7 +1,7 @@
-// A command runner scripted from a table. It answers bd, git, gh and claude and records every call.
+// A command runner scripted from a table. It answers bd, git, gh, claude and curl and records every call.
 import type { CommandOptions, CommandResult, CommandRunner } from "../runner.ts";
 
-export type ScriptedCommand = "bd" | "git" | "gh" | "claude";
+export type ScriptedCommand = "bd" | "git" | "gh" | "claude" | "curl";
 
 export interface ScriptedAnswer {
   command: ScriptedCommand;

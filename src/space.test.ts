@@ -156,6 +156,7 @@ test("the helpers later slices build on are thin argv builders over bd 1.3.1", a
   const { space: s, runner } = space(stationActor("sona", "grill"), [
     { command: "bd", args: ["--actor", "sona/grill", "dep", "add"] },
     { command: "bd", args: ["--actor", "sona/grill", "ready"], stdout: '[{"id":"kitchen-1.1","title":"grill","status":"open","issue_type":"task","assignee":"sona/grill"}]' },
+    { command: "bd", args: ["--actor", "sona/grill", "list"], stdout: '[{"id":"kitchen-7","title":"umka/grill","status":"open","issue_type":"phase","labels":["rev:ab12cd"],"description":"---\\nphase: grill\\n---\\n"}]' },
     { command: "bd", args: ["--actor", "sona/grill", "show", "kitchen-1"], stdout: '[{"id":"kitchen-1","title":"order","status":"open","issue_type":"epic","notes":"repos: nomadec/kitchen\\nrecipe: umka rev:ab12cd\\nclass: idea"}]' },
     { command: "bd", args: ["--actor", "sona/grill", "gate", "create"], stdout: '{"id":"kitchen-1.2","title":"pass: grill","status":"open","issue_type":"gate","await_type":"human"}' },
     { command: "bd", args: ["--actor", "sona/grill", "gate", "list"], stdout: '[{"id":"kitchen-1.2","title":"pass: grill","status":"open","issue_type":"gate","await_type":"human"}]' },
@@ -165,6 +166,7 @@ test("the helpers later slices build on are thin argv builders over bd 1.3.1", a
 
   await s.addDependency("kitchen-1.3", "kitchen-1.1");
   assert.deepEqual((await s.ready({ assignee: "sona/grill", labels: ["phase:grill"] })).map((b) => b.id), ["kitchen-1.1"]);
+  assert.deepEqual((await s.list({ type: "phase", labels: ["rev:ab12cd"] })).map((b) => b.description), ["---\nphase: grill\n---\n"]);
   assert.equal((await s.show("kitchen-1")).title, "order");
   assert.equal(await s.readNote("kitchen-1", "class"), "idea");
   assert.equal(await s.readNote("kitchen-1", "worktree"), undefined);
@@ -177,6 +179,7 @@ test("the helpers later slices build on are thin argv builders over bd 1.3.1", a
   assert.deepEqual(runner.calls.map((c) => c.argv), [
     ["bd", "--actor", "sona/grill", "dep", "add", "kitchen-1.3", "kitchen-1.1"],
     ["bd", "--actor", "sona/grill", "ready", "--assignee", "sona/grill", "--label", "phase:grill", "--limit", "0", "--json"],
+    ["bd", "--actor", "sona/grill", "list", "--type", "phase", "--label", "rev:ab12cd", "--limit", "0", "--json"],
     ["bd", "--actor", "sona/grill", "show", "kitchen-1", "--json"],
     ["bd", "--actor", "sona/grill", "show", "kitchen-1", "--json"],
     ["bd", "--actor", "sona/grill", "show", "kitchen-1", "--json"],

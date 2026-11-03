@@ -17,6 +17,7 @@ export interface Bead {
   await_type?: string;
   labels?: string[];
   notes?: string;
+  description?: string;
   [field: string]: unknown;
 }
 
@@ -69,6 +70,12 @@ export interface ReadyFilter {
   parent?: string;
 }
 
+export interface ListFilter {
+  type?: string;
+  /** Every label must be present. */
+  labels?: readonly string[];
+}
+
 export interface GateFields {
   /** The bead the gate blocks: the phase laid behind a pass, or behind an external wait. */
   blocks: string;
@@ -114,6 +121,8 @@ export interface Space {
   addDependency(id: string, blockedBy: string): Promise<void>;
   /** Open beads with no active blocker, as `bd ready` lists them. */
   ready(filter?: ReadyFilter): Promise<Bead[]>;
+  /** Open beads of a type, with their text, as `bd list` prints them. */
+  list(filter?: ListFilter): Promise<Bead[]>;
   show(id: string): Promise<Bead>;
   /** The value of the `<key>: <value>` line of the bead's notes, if there is one. */
   readNote(id: string, key: string): Promise<string | undefined>;
@@ -130,7 +139,8 @@ export interface Space {
   events(since: number): Promise<JournalEvent[]>;
 }
 
-const RULE = "a cooperative rule, not a security boundary: docs/trust-model.md";
+/** The pointer every refusal ends with. */
+export const RULE = "a cooperative rule, not a security boundary: docs/trust-model.md";
 
 export function openSpace(deps: SpaceDeps): Space {
   const name = actorName(deps.actor);
@@ -219,6 +229,14 @@ export function openSpace(deps: SpaceDeps): Space {
         ...each("--label", filter.labels),
         ...flag("--type", filter.type),
         ...flag("--parent", filter.parent),
+        "--limit", "0",
+      ]),
+
+    list: (filter = {}) =>
+      bdJson<Bead[]>([
+        "list",
+        ...flag("--type", filter.type),
+        ...each("--label", filter.labels),
         "--limit", "0",
       ]),
 

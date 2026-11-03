@@ -40,6 +40,13 @@ export function spaceDir(env: Env): string {
   return path.join(kitchenConfigDir(env), "space");
 }
 
+/** The host config `kitchen init` wrote, or undefined when this host has none yet. */
+export function readHostConfig(env: Env): HostConfig | undefined {
+  const file = hostConfigFile(env);
+  if (!fs.existsSync(file)) return undefined;
+  return JSON.parse(fs.readFileSync(file, "utf8")) as HostConfig;
+}
+
 export function writeHostConfig(env: Env, config: HostConfig): string {
   const file = hostConfigFile(env);
   fs.mkdirSync(path.dirname(file), { recursive: true });

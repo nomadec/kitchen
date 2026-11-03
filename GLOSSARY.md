@@ -2,19 +2,19 @@
 
 ## Kitchen
 
-The factory: the shared work graph, the stations registered on it, the expeditor that starts them, and the pass where humans decide. The delivery loop is one recipe that runs inside it.
+The runtime: one shared work graph, the phases and stations registered on it, the expeditor that starts stations, and the pass where humans decide. Kitchen holds no recipe of its own; every recipe is registered into it.
 
 ## Order
 
-One unit of work from a source to its outcome. An order holds a sequence of phases and the passes between them. Umka called this a unit.
+One unit of work from a source to its outcome. An order names the repositories it touches, carries a class, and walks a path of phases and passes. Umka called this a unit.
 
 ## Recipe
 
-A graph of phases and passes that an order follows, with the rules for which phase follows which. Umka called this the phase registry.
+A bundle of phases that one plugin registers in one act. The space holds one phase graph, and an edge may lead from a phase of one recipe to a phase of another. Umka called this the phase registry.
 
 ## Phase
 
-One step of a recipe, worked by one station in one turn. A phase is either worked without a human present or with one.
+One step of work: the skill it runs, the model it wants, what it needs, its budget, how many rounds it may run in one order, what it produces, and the rules for which phases may follow. A phase is registered into the space and worked by one station in one turn.
 
 ## Turn
 
@@ -22,7 +22,7 @@ One phase of one order, worked in one fresh session, ending in a result line.
 
 ## Pass
 
-A point in a recipe where a human decides before the order continues. A pass holds a brief and closes with the human's word. Umka called this a checkpoint.
+A point where a human decides before the order continues. A pass holds a brief and closes with the human's word. It is laid only when a human is needed. Umka called this a checkpoint.
 
 ## Brief
 
@@ -30,15 +30,15 @@ The short description a station writes for a pass: what was done, what is asked,
 
 ## Station
 
-A registered agent role: what it can do, when to call it, who owns it, and how to start it. A station is cold until the expeditor starts it for a phase.
+A registered, prepared place where turns run: a host, the repositories checked out there, the plugins and tooling present, the models it can launch, how many turns it runs at once, and whether a human sits there. A station is owned by one person. A phase goes to a station that offers what the phase and its order need.
 
 ## Expeditor
 
-The resident process on a host that watches the work graph, starts the stations registered on that host when a phase is ready for them, and keeps their leases alive. Umka called this the tick.
+The resident process on a host that watches the work graph, starts the stations registered on that host when a phase is ready for them, keeps their leases alive, and evaluates the typed waits. An attended station starts a turn only on the human's word. Umka called this the tick.
 
 ## Source
 
-Where an order comes from: a tracker issue, a file, or free text.
+Where orders come from: a tracker, a file, or free text. A polled source is registered into the space with its cursor and is polled by its owner's expeditor.
 
 ## Tick
 
@@ -54,16 +54,32 @@ A machine that runs one expeditor and the stations registered on it.
 
 ## Launch spec
 
-The part of a station that says how to start it: host, provider, model, how it signs in, what it loads, where it works, how many turns it may run at once, and its budget per turn. Secrets are named, never held.
-
-## Router
-
-The phase at intake that grades an order, picks the model tier for it, and assigns its first phase to a station.
+The part of a station that says how to start a turn: provider, the models it can launch, how it signs in, what it loads, where each repository is checked out, how many turns it may run at once, and its budget per turn. Secrets are named, never held.
 
 ## Space
 
 One work graph: the beads database an order, a station and a pass live in. Kitchen has one team space.
 
-## Delivery
+## Registration
 
-The first recipe: the Umka phases carried over as they are.
+The human act of adding a recipe, a station or a source to a space. A running station cannot register anything.
+
+## Path
+
+The sequence of phases one order walks through the graph. A path is read from the graph, not registered. An order may walk several paths in its life.
+
+## Class
+
+What an order currently is: a question, an idea, a proposal, a spec, a ticket or a bug. The turn that moves an order onto another path updates its class.
+
+## Turn driver
+
+The one plugin Kitchen ships. In a station's session it reads the phase, runs its skill, reconciles, judges the rules for what follows, lays the next phases and ends with the result line.
+
+## Umka recipe
+
+The first recipe: Umka's phases, registered into a kitchen from the Umka plugin.
+
+## Actor
+
+Who made a write. A person writes as their name. A turn writes as the owner and the station, and the expeditor as the owner and the word expeditor. A pass closes only under a person's name.

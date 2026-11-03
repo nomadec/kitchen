@@ -14,7 +14,14 @@ import type { ScriptedAnswer } from "../testing/index.ts";
 const EXPEDITOR = ["--actor", "sona/expeditor"];
 const OVEN = ["--actor", "sona/oven"];
 
+/** Beneath every table: no gate open and no closed pass to apply (answers.test.ts scripts those). */
+const QUIET: ScriptedAnswer[] = [
+  { command: "bd", args: [...EXPEDITOR, "gate", "check", "--json"], stdout: "No open gates found.\n" },
+  { command: "bd", args: [...EXPEDITOR, "list", "--type", "gate", "--status", "closed"], stdout: "[]" },
+];
+
 function kitchen(t: { after(fn: () => void): void }, table: ScriptedAnswer[]) {
+  table.push(...QUIET);
   const host = initialisedHost(t, table);
   const run = () => main(["up", "--foreground", "--once"], host.deps);
   /** Every bd call's argv after `bd`, actor included. */
@@ -139,7 +146,7 @@ test("a child exiting non-zero with its phase open has the phase released by the
     [...EXPEDITOR, "update", "kitchen-21", "--add-label", "failed:1", "--assignee", "sona/oven", "--json"],
     [...OVEN, "update", "kitchen-20", "--status", "open", "--assignee", "", "--json"],
   ]);
-  assert.ok(!k.bd().some((argv) => argv[2] === "gate"), "one failure lays no pass");
+  assert.ok(!k.bd().some((argv) => argv[2] === "gate" && argv[3] === "create"), "one failure lays no pass");
   const end = k.log().find((line) => line.step === "turn");
   assert.deepEqual({ exit: end?.exit, outcome: end?.outcome, failure: end?.failure, failures: end?.failures }, { exit: 3, outcome: "failed", failure: "exit 3", failures: 1 });
 });
@@ -159,7 +166,7 @@ test("a second failure counts failed:2 in place of failed:1, lays the turn faile
 
   assert.equal(await k.run(), 0, k.err.join(""));
 
-  assert.deepEqual(k.bd().filter((argv) => (argv[2] === "update" && !argv.includes("--claim")) || argv[2] === "gate"), [
+  assert.deepEqual(k.bd().filter((argv) => (argv[2] === "update" && !argv.includes("--claim")) || (argv[2] === "gate" && argv[3] === "create")), [
     [...OVEN, "update", "kitchen-21", "--status", "open", "--assignee", "", "--json"],
     [...EXPEDITOR, "update", "kitchen-21", "--add-label", "failed:2", "--remove-label", "failed:1", "--assignee", "sona/oven", "--json"],
     [...EXPEDITOR, "gate", "create", "--type", "human", "--blocks", "kitchen-21", "--title", "turn failed: reproduce", "--reason", "kitchen-21 (reproduce: Stale cookie) failed 2 times on sona/oven; the last turn exit 1: exit 1", "--json"],
@@ -263,7 +270,8 @@ test("a stale lease found on tick is reclaimed and a phase's assignee restored f
 
   assert.equal(await k.run(), 0, k.err.join(""));
 
-  assert.deepEqual(k.bd().slice(1, 5), [
+  // After the stations, the gate check and the closed-pass list come the reclaim and the restores.
+  assert.deepEqual(k.bd().slice(3, 7), [
     [...EXPEDITOR, "reclaim", "--json"],
     [...EXPEDITOR, "show", "kitchen-31", "--json"],
     [...EXPEDITOR, "update", "kitchen-31", "--assignee", "sona/oven", "--json"],

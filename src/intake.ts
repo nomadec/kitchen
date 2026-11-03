@@ -13,6 +13,9 @@ import type { Station } from "./station.ts";
 /** The note intake writes on the entry phase: the one assignment no turn made. */
 export const ENTRY_NOTE = "entry: mechanical";
 
+/** The title of the pass intake lays when no station qualifies: `no station for <slug>`. */
+export const NO_STATION = "no station for";
+
 export interface IntakeRequest {
   source: OrderSource;
   recipe: string;
@@ -71,7 +74,7 @@ export async function intake(space: Space, request: IntakeRequest): Promise<Inta
     return { kind: "laid", order, revision: recipe.revision, phase, station: chosen, slug: entry.slug };
   }
   const gap = describeGap(request.owner, entry, need, stations);
-  const pass = await space.layGate({ blocks: order.id, type: "human", title: `no station for ${entry.slug}`, reason: gap });
+  const pass = await space.layGate({ blocks: order.id, type: "human", title: `${NO_STATION} ${entry.slug}`, reason: gap });
   // bd gate create takes no parent or assignee: a second call makes the pass the order's child, for the owner.
   await space.update(pass, { parent: order.id, assignee: request.owner });
   return { kind: "pass", order, revision: recipe.revision, pass, slug: entry.slug, gap };

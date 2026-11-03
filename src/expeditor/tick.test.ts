@@ -13,8 +13,10 @@ import type { ScriptedAnswer } from "../testing/index.ts";
 const EXPEDITOR = ["--actor", "sona/expeditor"];
 const PROMPT = (phase: string) => `Invoke the Skill tool with skill "kitchen:turn" and args "${phase}"`;
 
-/** Beneath every table: no stale lease to reclaim, and a phase read back after its turn is closed. The lease tests script the rest. */
+/** Beneath every table: no gate open, no closed pass to apply, no stale lease to reclaim, and a phase read back after its turn is closed. The answers and lease tests script the rest. */
 const SETTLED: ScriptedAnswer[] = [
+  { command: "bd", args: [...EXPEDITOR, "gate", "check", "--json"], stdout: "No open gates found.\n" },
+  { command: "bd", args: [...EXPEDITOR, "list", "--type", "gate", "--status", "closed"], stdout: "[]" },
   { command: "bd", args: [...EXPEDITOR, "reclaim", "--json"], stdout: '{"count":0,"reclaimed":null,"schema_version":1,"scoped":false}' },
   { command: "bd", args: [...EXPEDITOR, "show"], stdout: '[{"id":"kitchen-21","status":"closed","issue_type":"task"}]' },
 ];
@@ -263,9 +265,9 @@ test("the turn's result line, the last line of its output, is appended as a comm
     assert.equal(line.tick, 1);
     assert.match(String(line.at), /^2026-01-01T00:00:00\.000Z$/);
   }
-  for (const step of ["gates", "passes", "sources"]) {
-    assert.match(String(k.log().find((line) => line.step === step)?.skipped), /a later slice/);
-  }
+  assert.match(String(k.log().find((line) => line.step === "sources")?.skipped), /a later slice/);
+  assert.equal(k.log().find((line) => line.step === "gates")?.gates, "none open");
+  assert.deepEqual(k.log().find((line) => line.step === "passes")?.applied, []);
   assert.deepEqual(k.log().find((line) => line.step === "leases")?.alive, [], "no turn lives yet at the first tick's leases step");
   assert.deepEqual(k.log().find((line) => line.step === "reclaim")?.reclaimed, []);
   const turn = k.log().find((line) => line.step === "turn");

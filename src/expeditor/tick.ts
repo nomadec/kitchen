@@ -1,6 +1,7 @@
 // The tick: one pass of the expeditor over the work graph, as a sequence of named steps in the order
-// the spec lays them (Expeditor, ADR 0003). The steps for typed gates, Kitchen-laid passes and source
-// polling are named here and filled by later slices. The leases of the turns this host runs are
+// the spec lays them (Expeditor, ADR 0003). The step for source polling is named here and filled by a
+// later slice. The typed gates are evaluated by `bd gate check` and the word on a closed Kitchen-laid
+// pass is applied (answers.ts) before anything is dispatched. The leases of the turns this host runs are
 // heartbeated by the turns themselves (turn.ts), on their own interval between ticks; the `leases`
 // step reports them and the `reclaim` step reverts the stale leases bd finds and restores each phase's
 // assignee from its `station:` label, since reclaim clears it.
@@ -14,9 +15,10 @@ import type { LaidPhase } from "../laid.ts";
 import { LOOP } from "../order.ts";
 import { readStations } from "../registered.ts";
 import type { CommandRunner } from "../runner.ts";
-import { openSpace } from "../space.ts";
+import { openSpace, SpaceError } from "../space.ts";
 import type { Space } from "../space.ts";
 import type { Station } from "../station.ts";
+import { APPLIED, applyWord, kitchenLaid } from "./answers.ts";
 import type { TurnRunner } from "./claude.ts";
 import type { Log } from "./log.ts";
 import { endTurn, HEARTBEAT_INTERVAL_MS, startTurn, TURN_FAILED } from "./turn.ts";
@@ -115,8 +117,41 @@ export function expeditor(deps: ExpeditorDeps): Expeditor {
       log(state.report.tick, "stations", { stations: state.stations.map((s) => s.title) });
     },
 
-    gates: later("gates", "bd gate check for the typed gates"),
-    passes: later("passes", "the word on closed Kitchen-laid passes"),
+    gates: async (state) => {
+      // bd evaluates the typed gates itself (gh pr view for gh:pr, gh run view for gh:run, the clock for
+      // timer, the target's status for bead) and closes the resolved ones; the phase behind one is in
+      // bd ready from the next tick. No session is spent on a wait.
+      const check = await state.space.checkGates();
+      if (check === undefined) log(state.report.tick, "gates", { gates: "none open" });
+      else log(state.report.tick, "gates", { ...check });
+    },
+
+    passes: async (state) => {
+      // Every closed gate not yet applied: bd keeps the labelled ones out, and the expeditor passes over
+      // a recipe's pass (its turn applies the word) and a typed gate (which carries no word).
+      const applied: string[] = [];
+      for (const gate of await state.space.list({ type: "gate", status: "closed", excludeLabels: [APPLIED] })) {
+        if (gate.labels?.includes(APPLIED)) {
+          log(state.report.tick, "passes", { pass: gate.id, skipped: "applied already" });
+          continue;
+        }
+        if (!kitchenLaid(gate)) {
+          if (gate.await_type === "human") log(state.report.tick, "passes", { pass: gate.id, skipped: "not a pass Kitchen laid: its turn applies the word" });
+          continue;
+        }
+        try {
+          const done = await applyWord(state.space, gate, state.config.owner);
+          applied.push(gate.id);
+          log(state.report.tick, "passes", { ...done });
+        } catch (error) {
+          // The pass stays unlabelled, so the next tick applies it again once what refused it is put right.
+          if (!(error instanceof SpaceError)) throw error;
+          log(state.report.tick, "passes", { pass: gate.id, failed: error.message });
+        }
+      }
+      log(state.report.tick, "passes", { applied });
+    },
+
     sources: later("sources", "polling this host's sources"),
     leases: async (state) => {
       // The turns heartbeat their own leases on the interval while their children live (turn.ts); the

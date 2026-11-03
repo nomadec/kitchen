@@ -70,6 +70,8 @@ export interface BeadFilter {
   assignee?: string;
   /** Every label must be present. */
   labels?: readonly string[];
+  /** None of these labels may be present. */
+  excludeLabels?: readonly string[];
   type?: string;
   parent?: string;
   /** The stored status: `open`, `in_progress`, `blocked`, `deferred`, `closed`. */
@@ -92,6 +94,14 @@ export interface GateFields {
   reason?: string;
   awaitId?: string;
   timeout?: string;
+}
+
+/** What one `bd gate check` did: the counts it prints, and the gates it closed as resolved. */
+export interface GateCheck {
+  checked: number;
+  resolved: string[];
+  escalated: number;
+  errors: number;
 }
 
 /** One row of the events journal, as `bd events tail` prints it; only `seq` is named. */
@@ -140,8 +150,10 @@ export interface Space {
   layGate(fields: GateFields): Promise<Bead>;
   /** The open gate beads. */
   gates(): Promise<Bead[]>;
-  /** Evaluates the typed gates (all of them, or one type) and closes those that resolved. */
-  checkGates(type?: GateType): Promise<void>;
+  /** Evaluates the typed gates (all of them, or one type) and closes those that resolved; nothing when none is open. */
+  checkGates(type?: GateType): Promise<GateCheck | undefined>;
+  /** The beads this one blocks: the phase behind a gate. */
+  blocked(id: string): Promise<Bead[]>;
   /** The events journal after a sequence number. */
   events(since: number): Promise<JournalEvent[]>;
   /**
@@ -269,6 +281,7 @@ export function openSpace(deps: SpaceDeps): Space {
         ...flag("--assignee", filter.assignee),
         ...flag("--parent", filter.parent),
         ...flag("--status", filter.status),
+        ...each("--exclude-label", filter.excludeLabels),
         ...flag("--external-ref", filter.externalRef),
         ...flag("--external-contains", filter.externalContains),
         "--limit", "0",
@@ -303,8 +316,17 @@ export function openSpace(deps: SpaceDeps): Space {
     gates: () => bdJson<Bead[]>(["gate", "list", "--limit", "0"]),
 
     checkGates: async (type) => {
-      await bdJson<unknown>(["gate", "check", ...flag("--type", type)]);
+      // bd gate check --json prints a line per gate it evaluated (`✓ <id>: resolved - ...`), a summary
+      // line, then the counts as one JSON object; with no open gate it prints one sentence and no JSON.
+      const { stdout } = await bd(["gate", "check", ...flag("--type", type), "--json"]);
+      const json = stdout.startsWith("{") ? stdout : stdout.slice(stdout.lastIndexOf("\n{") + 1);
+      if (!json.startsWith("{")) return undefined;
+      const counts = JSON.parse(json) as { checked: number; escalated: number; errors: number };
+      const resolved = [...stdout.matchAll(/^\S+ (\S+): resolved\b/gmu)].map((match) => match[1] ?? "");
+      return { checked: counts.checked, resolved, escalated: counts.escalated, errors: counts.errors };
     },
+
+    blocked: (id) => bdJson<Bead[]>(["dep", "list", id, "--direction", "up", "--type", "blocks"]),
 
     events: async (since) => {
       const { stdout } = await bd(["events", "tail", "--since", String(since)]);

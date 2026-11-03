@@ -87,7 +87,17 @@ async function foreground(deps: CliDeps, config: HostConfig, interval: number, p
     deps.stdout(`Tick ${report.tick}: laid ${report.laid.length}, started ${report.started.length}, waiting ${report.waiting.length}, ended ${ends.length}\n`);
     return 0;
   }
-  const servers = await serve(deps, config, log, port);
+  let servers: { stop(): Promise<void> };
+  try {
+    servers = await serve(deps, config, log, port);
+  } catch (error) {
+    // The port probe or a listen refused: logged, the state left stopped, and the exit is the service's to report.
+    const failed = error instanceof Error ? error.message : String(error);
+    log.write({ step: "serve", failed });
+    state.stopped();
+    deps.stderr(`kitchen up: could not serve: ${failed}\n`);
+    return 1;
+  }
   try {
     // `kitchen down` stops the service, which signals this process: the loop ends after the current
     // tick and the claims stay as they are, reclaimable once their leases go stale.

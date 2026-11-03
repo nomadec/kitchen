@@ -257,6 +257,47 @@ test("a child a signal ended that was not the wall clock's (the service stopped 
   assert.deepEqual({ exit: end?.exit, outcome: end?.outcome, failures: end?.failures }, { exit: 128, outcome: "reclaimed", failures: undefined });
 });
 
+test("a child a signal ended that stops nothing (the kernel's SIGKILL at an out-of-memory) failed: the count goes up as for a crash, so a child that dies the same way on every start reaches the turn failed pass", async (t) => {
+  const k = kitchen(t, [
+    ...oneTurn(phase("kitchen-21", "kitchen-20", "reproduce", "oven")),
+    turn("", { exitCode: 137, signal: "SIGKILL" }),
+    shown(phase("kitchen-21", "kitchen-20", "reproduce", "oven", { status: "in_progress" })),
+    commented("kitchen-21"),
+    updated(OVEN, "kitchen-21"),
+    released("oven", "kitchen-20"),
+  ]);
+
+  assert.equal(await k.run(), 0, k.err.join(""));
+
+  assert.deepEqual(k.bd().filter((argv) => argv[2] === "update" && !argv.includes("--claim"))[0], [
+    ...OVEN, "update", "kitchen-21", "--add-label", "failed:1", "--assignee", "sona/oven", "--status", "open", "--json",
+  ]);
+  const end = k.log().find((line) => line.step === "turn");
+  assert.deepEqual({ exit: end?.exit, outcome: end?.outcome, failure: end?.failure, failures: end?.failures }, { exit: 137, outcome: "failed", failure: "ended by SIGKILL", failures: 1 });
+});
+
+test("an ending that throws anything else (bd show answering no bead) is logged as failed the same way and the service goes on: no rejection is left unhandled", async (t) => {
+  const k = kitchen(t, [
+    ...oneTurn(phase("kitchen-21", "kitchen-20", "reproduce", "oven")),
+    turn("kitchen-21 closed\n"),
+    { command: "bd", args: [...EXPEDITOR, "show", "kitchen-21"], stdout: "[]" },
+    released("oven", "kitchen-20"),
+  ]);
+  const unhandled: unknown[] = [];
+  const onUnhandled = (reason: unknown): void => {
+    unhandled.push(reason);
+  };
+  process.on("unhandledRejection", onUnhandled);
+  t.after(() => process.off("unhandledRejection", onUnhandled));
+
+  assert.equal(await k.run(), 0, k.err.join(""));
+
+  const end = k.log().find((line) => line.step === "turn" && line.failed);
+  assert.equal(end?.failed, "bd show kitchen-21 answered with no bead");
+  assert.deepEqual(unhandled, []);
+  assert.equal(k.out.at(-1), "Tick 1: laid 0, started 1, waiting 0, ended 1\n");
+});
+
 test("a phase another station holds by the turn's end (its lease reclaimed and taken elsewhere after a refused heartbeat) is left to that holder: no release, no restore, and the order likewise", async (t) => {
   const k = kitchen(t, [
     stations(station("kitchen-10", "oven")),

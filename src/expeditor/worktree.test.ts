@@ -141,7 +141,8 @@ test("the hooks directory is written under the checkout with every client-side h
     assert.ok(fs.statSync(hook).mode & 0o100, `${name} is executable by its owner`);
     const text = fs.readFileSync(hook, "utf8");
     assert.match(text, /^#!\/bin\/sh\n/);
-    assert.match(text, /git config --file "\$common\/config" core\.hooksPath .* echo "\$common\/hooks"/, "the repository's own hooks directory, its core.hooksPath first");
+    assert.match(text, /git config --file "\$common\/config" core\.hooksPath .* --global core\.hooksPath .* --system core\.hooksPath .* echo "\$common\/hooks"/, "the repository's own hooks directory: its core.hooksPath, then the global one, then the system one");
+    assert.doesNotMatch(text, /case "\$hooks"/, "a relative core.hooksPath stays relative to the working tree root git runs the hook from");
     assert.match(text, /"\$hooks\/\$name" "\$@" \|\| exit \$\?/, "the repository's hook of the same name runs, and its refusal is the worktree's");
     assert.doesNotMatch(text, /interpret-trailers/);
   }
@@ -216,6 +217,7 @@ test("a worktree that exists already is reused: the remote branch is fetched and
     ["-C", worktree, "merge", "--ff-only", "origin/kitchen/kitchen-20"],
   ]);
   assert.equal(k.claude()[0]?.cwd, worktree);
+  assert.ok(fs.existsSync(path.join(k.checkouts.kitchen, ".kitchen", "hooks", "pre-commit")), "the forwarding hooks are written on reuse too, so a worktree made by an earlier version forwards what this one does");
 });
 
 test("an order naming no repository, or a station whose worktree policy is not per-order, runs claude in the station's checkout with no git call", async (t) => {

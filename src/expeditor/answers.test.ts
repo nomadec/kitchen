@@ -34,9 +34,9 @@ function kitchen(t: { after(fn: () => void): void }, table: ScriptedAnswer[]) {
 const PHASE_TEXT = (slug: string) =>
   `---\nphase: ${slug}\nskill: umka:${slug}\nfrom: []\nto: []\nartifact: a PR\nmodel: claude-opus-5\nentry: [ticket]\nbudget:\n  usd: 5\n  effort: high\n---\n# ${slug}\n`;
 
-const station = (id: string, name: string, options: { attended?: boolean } = {}) => ({
+const station = (id: string, name: string, options: { attended?: boolean; host?: string } = {}) => ({
   id, title: `sona/${name}`, status: "open", issue_type: "station",
-  labels: ["owner:sona", "host:sona-laptop", "cap:2", ...(options.attended ? ["attended"] : [])],
+  labels: ["owner:sona", `host:${options.host ?? "sona-laptop"}`, "cap:2", ...(options.attended ? ["attended"] : [])],
   notes: `offers: nomadec/kitchen checked out\n\n\`\`\`json\n${JSON.stringify({
     provider: "claude", models: ["claude-opus-5"], auth: "subscription", plugins: [], skills: [],
     repositories: [{ slug: "nomadec/kitchen", path: "/home/sona/src/kitchen" }],
@@ -164,6 +164,8 @@ test("retry <station title> reassigns the phase: the assignee and the station: l
     NO_GATES,
     closedPasses(pass("kitchen-22", "turn failed: reproduce", "retry sona/desk")),
     behind("kitchen-22", phase("kitchen-21", "kitchen-20", "reproduce", "oven", { labels: ["failed:2"] })),
+    ownerStations(station("kitchen-10", "oven"), station("kitchen-11", "desk", { host: "sona-mac" })),
+    orderShown("kitchen-20", "nomadec/kitchen"),
     updated("kitchen-21"),
     updated("kitchen-22"),
     ready("oven"),
@@ -180,6 +182,56 @@ test("retry <station title> reassigns the phase: the assignee and the station: l
   const applied = k.log().find((line) => line.step === "passes" && line.pass);
   assert.deepEqual({ word: applied?.word, applied: applied?.applied, station: applied?.station }, { word: "retry sona/desk", applied: "retry", station: "sona/desk" });
   assert.equal(k.claude().length, 0, "the desk is not a station of this host: the phase waits for its expeditor");
+});
+
+test("retry <station title> naming no registered station of the owner (a typo) leaves the phase as it is and notes the order: nothing is assigned to a station that is not there", async (t) => {
+  const k = kitchen(t, [
+    stations(station("kitchen-10", "oven")),
+    NO_GATES,
+    closedPasses(pass("kitchen-22", "turn failed: reproduce", "retry sona/ovne")),
+    behind("kitchen-22", phase("kitchen-21", "kitchen-20", "reproduce", "oven", { labels: ["failed:2"] })),
+    ownerStations(station("kitchen-10", "oven")),
+    updated("kitchen-20"),
+    updated("kitchen-22"),
+    ready("oven"),
+    held(),
+    running("oven"),
+    ...SETTLED,
+  ]);
+
+  assert.equal(await k.run(), 0, k.err.join(""));
+
+  assert.deepEqual(k.bd().filter((argv) => argv[2] === "update"), [
+    [...EXPEDITOR, "update", "kitchen-20", "--append-notes", 'kitchen-22 (turn failed: reproduce) closed with "retry sona/ovne", but no station titled sona/ovne is registered to sona: the order stays open for sona to continue by hand', "--json"],
+    [...EXPEDITOR, "update", "kitchen-22", "--add-label", "applied", "--json"],
+  ]);
+  const applied = k.log().find((line) => line.step === "passes" && line.pass);
+  assert.deepEqual({ applied: applied?.applied, phases: applied?.phases, station: applied?.station }, { applied: "retry", phases: [], station: "sona/ovne" });
+});
+
+test("retry <station title> naming a station that lacks what the phase needs (a repository the order names) leaves the phase as it is and notes the gap on the order", async (t) => {
+  const k = kitchen(t, [
+    stations(station("kitchen-10", "oven")),
+    NO_GATES,
+    closedPasses(pass("kitchen-22", "turn failed: reproduce", "retry sona/desk")),
+    behind("kitchen-22", phase("kitchen-21", "kitchen-20", "reproduce", "oven", { labels: ["failed:2"] })),
+    ownerStations(station("kitchen-10", "oven"), station("kitchen-11", "desk", { host: "sona-mac" })),
+    orderShown("kitchen-20", "nomadec/kitchen, sona-is/sona"),
+    updated("kitchen-20"),
+    updated("kitchen-22"),
+    ready("oven"),
+    held(),
+    running("oven"),
+    ...SETTLED,
+  ]);
+
+  assert.equal(await k.run(), 0, k.err.join(""));
+
+  assert.deepEqual(k.bd().filter((argv) => argv[2] === "update").map((argv) => argv.slice(2, 5)), [
+    ["update", "kitchen-20", "--append-notes"],
+    ["update", "kitchen-22", "--add-label"],
+  ]);
+  assert.match(String(k.bd().find((argv) => argv[2] === "update" && argv[3] === "kitchen-20")?.[5]), /but sona\/desk lacks sona-is\/sona for kitchen-21: the order stays open/);
 });
 
 test("the word stop closes the order's open phases and then the order with the word as reason, under the expeditor, and labels the pass applied", async (t) => {
@@ -276,6 +328,8 @@ test("retry <station title> on a no station for pass assigns the phase laid unas
     NO_GATES,
     closedPasses(pass("kitchen-32", "no station for reproduce", "retry sona/oven", { parent: "kitchen-30" })),
     behind("kitchen-32", unassigned("kitchen-31", "kitchen-30", "reproduce")),
+    ownerStations(station("kitchen-10", "oven")),
+    orderShown("kitchen-30", "nomadec/kitchen"),
     updated("kitchen-31"),
     updated("kitchen-32"),
     ready("oven", phase("kitchen-31", "kitchen-30", "reproduce", "oven")),

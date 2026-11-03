@@ -2,7 +2,9 @@
 // section the turn behind it runs; the three passes Kitchen lays (`no station for <phase>`, `rounds
 // reached: <phase>`, `turn failed: <phase>`) carry none, so the expeditor applies their word on tick:
 // `retry` reopens the phase behind the pass with its failure count cleared, `retry <station title>`
-// moves it to that station as well, `stop` closes the order with the word, and any other word leaves
+// moves it to that station as well (one registered to the owner that lacks nothing the phase needs;
+// any other title leaves the phase as it is, noted on the order), `stop` closes the order with the
+// word, and any other word leaves
 // the pass closed and the order open with a note saying the human continues by hand. A phase laid
 // unassigned behind a `no station for` pass is assigned on `retry` by intake's mechanical choice
 // again, among the owner's stations as they are now; still none, and a new pass names the gap. The
@@ -14,6 +16,8 @@ import { FAILED, failures } from "../laid.ts";
 import { parseOrder } from "../order.ts";
 import { readStations } from "../registered.ts";
 import type { Bead, BeadRef, Space, UpdateFields } from "../space.ts";
+import { lacks } from "../station.ts";
+import type { Need } from "../station.ts";
 import { TURN_FAILED } from "./turn.ts";
 
 /** The label on a pass whose word has been applied, by the expeditor or by the turn behind it. */
@@ -84,8 +88,20 @@ export async function applyWord(space: Space, pass: Bead, owner: string): Promis
     done.phases = [];
     if (word.station !== undefined) done.station = word.station;
     for (const phase of phases) {
-      const station = word.station ?? (assigned(phase) ? undefined : await chooseAgain(space, phase, order, owner, done));
-      if (station === undefined && !assigned(phase)) continue;
+      let station: string | undefined;
+      if (word.station !== undefined) {
+        // The named station as the lay helper would take it: registered, and lacking nothing the
+        // phase needs; a typo or a gap leaves the phase as it is rather than assigned to nothing.
+        const gap = await unfit(space, word.station, phase, order, owner);
+        if (gap !== undefined) {
+          await byHand(gap);
+          continue;
+        }
+        station = word.station;
+      } else if (!assigned(phase)) {
+        station = await chooseAgain(space, phase, order, owner, done);
+        if (station === undefined) continue;
+      }
       await space.update(phase, retried(phase, station));
       done.phases.push(phase.id);
     }
@@ -115,6 +131,21 @@ function assigned(phase: Bead): boolean {
   return typeof phase.assignee === "string" && phase.assignee !== "";
 }
 
+/** What the phase needs of a station: its model note and its order's repositories. */
+async function needOf(space: Space, phase: Bead, order: string | undefined): Promise<Need> {
+  const repos = order === undefined ? [] : parseOrder(await space.show(order)).repos;
+  return { model: noteLine(phase.notes ?? "", "model") || undefined, repos };
+}
+
+/** Why the station `retry <station title>` names cannot take the phase: not registered to the owner, or lacking what the phase needs; nothing when it can. */
+async function unfit(space: Space, title: string, phase: Bead, order: string | undefined, owner: string): Promise<string | undefined> {
+  const station = (await readStations(space, { owner })).find((s) => s.title === title);
+  if (!station) return `but no station titled ${title} is registered to ${owner}`;
+  const gap = lacks(station, await needOf(space, phase, order));
+  if (gap.length) return `but ${title} lacks ${gap.join(", ")} for ${phase.id}`;
+  return undefined;
+}
+
 /**
  * Intake's mechanical choice, made again for a phase laid unassigned: the owner's stations as they
  * are now, against the phase's model note and its order's repositories. None qualifying lays the
@@ -122,8 +153,7 @@ function assigned(phase: Bead): boolean {
  */
 async function chooseAgain(space: Space, phase: Bead, order: string | undefined, owner: string, done: Applied): Promise<string | undefined> {
   const slug = labelValue(phase, "phase") ?? "";
-  const repos = order === undefined ? [] : parseOrder(await space.show(order)).repos;
-  const need = { model: noteLine(phase.notes ?? "", "model") || undefined, repos };
+  const need = await needOf(space, phase, order);
   const stations = await readStations(space, { owner });
   const chosen = await chooseStation(space, stations, need);
   if (chosen) {

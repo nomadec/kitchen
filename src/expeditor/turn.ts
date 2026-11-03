@@ -2,7 +2,7 @@
 // station actor because beads requires them from the holder, the order's worktrees between them, then
 // the runner. While the child lives the station heartbeats both leases on an interval and the station's
 // wall-clock timeout kills a child that outlives it. At the end the result line (the session's last
-// line, else the `result:` note the driver writes when its output is the terminal's) is commented on
+// line, else the `result:` note the driver wrote during the turn when its output is the terminal's) is commented on
 // the phase as the expeditor; a phase the child left open is set open again by the station, the
 // holder, in one write that keeps it assigned to the station its `station:` label names and counts a
 // failed turn as `failed:<n>`, and the second failure lays the `turn failed` pass for the owner as
@@ -46,6 +46,8 @@ export interface Turn {
   /** The order's worktrees in this station's checkouts, in the order the order names its repositories. */
   worktrees: Worktree[];
   handle: TurnHandle;
+  /** The `result:` note as the claim found it, so a line an earlier turn left is not taken for this one's. */
+  resultBefore?: string;
 }
 
 export type TurnStart =
@@ -54,7 +56,7 @@ export type TurnStart =
   | { kind: "held"; by: string }
   /** The phase was claimed first by another expeditor; the take is released again. */
   | { kind: "claimed"; by: string }
-  /** A worktree could not be prepared (git saying why) or the launch could not (a secret unresolved); the take, and a claim made, are released again. */
+  /** A worktree could not be prepared (git saying why) or the launch could not (a secret unresolved); the take is released, and a phase claimed is open again for its station. */
   | { kind: "unprepared"; reason: string };
 
 /**
@@ -104,8 +106,9 @@ export async function startTurn(deps: StartTurnDeps, station: Station, phase: La
     await deps.station.release(order);
     return { kind: "unprepared", reason: error.message };
   }
+  let claimed: Bead;
   try {
-    await deps.station.claim({ id: phase.id, issue_type: "task" });
+    claimed = await deps.station.claim({ id: phase.id, issue_type: "task" });
   } catch (error) {
     const holder = claimedBy(error);
     if (!holder) throw error;
@@ -117,11 +120,16 @@ export async function startTurn(deps: StartTurnDeps, station: Station, phase: La
     handle = deps.runner({ launch: station.launch, phase, mode, order: parsed, worktrees });
   } catch (error) {
     if (!(error instanceof LaunchError)) throw error;
-    await deps.station.release({ id: phase.id, issue_type: "task" });
+    // Open again for its station, not released unassigned: a phase with no assignee is in no ready
+    // list and holds no lease, so nothing would surface it once the host holds the secret.
+    await deps.station.update({ id: phase.id, issue_type: "task" }, { status: "open", assignee: phase.station });
     await deps.station.release(order);
     return { kind: "unprepared", reason: error.message };
   }
-  return { kind: "started", turn: { phase, station, order: parsed, mode, worktrees, handle } };
+  const turn: Turn = { phase, station, order: parsed, mode, worktrees, handle };
+  const resultBefore = noteLine(claimed.notes ?? "", RESULT_NOTE);
+  if (resultBefore !== undefined) turn.resultBefore = resultBefore;
+  return { kind: "started", turn };
 }
 
 /**
@@ -176,7 +184,7 @@ export async function endTurn(deps: EndTurnDeps, turn: Turn): Promise<TurnEnd> {
     await lease;
     const killed = await watch;
     const phase = await deps.expeditor.show(turn.phase.id);
-    const resultLine = lastLine(result.stdout) ?? (noteLine(phase.notes ?? "", RESULT_NOTE) || `exit ${result.exitCode}`);
+    const resultLine = lastLine(result.stdout) ?? resultNote(turn, phase) ?? `exit ${result.exitCode}`;
     await deps.expeditor.comment(turn.phase.id, resultLine);
     if (phase.status === "closed") return { resultLine, exitCode: result.exitCode, outcome: "closed" };
     // Left open, but held by another now: its lease went stale, was reclaimed, and another turn took it.
@@ -228,14 +236,19 @@ async function watchClock(deps: EndTurnDeps, turn: Turn, signal: AbortSignal): P
   return reason;
 }
 
+/** The signals that stop a service and its children (`kitchen down`, a shutdown, a closed terminal), as the runtime names them. */
+const STOP_SIGNALS: readonly string[] = ["SIGTERM", "SIGINT", "SIGHUP"];
+
 /**
- * Why the turn failed: the kill, the budget overrun the harness reported, or a non-zero exit. A child
- * a signal ended that was not the wall clock's (`kitchen down` stopping the service, with the child)
- * is no failure of the turn: the phase is reclaimed, and a restart loses nothing.
+ * Why the turn failed: the kill, the budget overrun the harness reported, a non-zero exit, or a signal
+ * that was no stop (the kernel's SIGKILL at an out-of-memory, a SIGSEGV), which counts like a crash so
+ * a child that dies the same way on every start reaches the `turn failed` pass. A child a stop signal
+ * ended that was not the wall clock's (`kitchen down` stopping the service, with the child) is no
+ * failure of the turn: the phase is reclaimed, and a restart loses nothing.
  */
 function failureOf(result: CommandResult, killed: string | undefined): string | undefined {
   if (killed !== undefined) return killed;
-  if (result.signal !== undefined) return undefined;
+  if (result.signal !== undefined) return STOP_SIGNALS.includes(result.signal) ? undefined : `ended by ${result.signal}`;
   if (BUDGET_OVERRUN.test(result.stderr) || BUDGET_OVERRUN.test(result.stdout)) return "budget overrun reported by the harness";
   if (result.exitCode !== 0) return `exit ${result.exitCode}`;
   return undefined;
@@ -257,6 +270,12 @@ async function layTurnFailedPass(deps: EndTurnDeps, turn: Turn, phase: Bead, las
 function claimedBy(error: unknown): string | undefined {
   if (!(error instanceof SpaceError)) return undefined;
   return /already claimed by (\S+)/.exec(error.result.stderr)?.[1];
+}
+
+/** The `result:` note the driver wrote during this turn; one that was there at the claim is an earlier turn's. */
+function resultNote(turn: Turn, phase: Bead): string | undefined {
+  const line = noteLine(phase.notes ?? "", RESULT_NOTE);
+  return line && line !== turn.resultBefore ? line : undefined;
 }
 
 function lastLine(stdout: string): string | undefined {

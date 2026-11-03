@@ -67,11 +67,22 @@ export function resolveSecrets(env: Record<string, string | undefined>, names: r
       continue;
     }
     const file = secretFile(env, name);
-    const fromFile = fs.existsSync(file) ? fs.readFileSync(file, "utf8").replace(/\r?\n$/, "") : "";
+    const fromFile = readSecretFile(name, file);
     if (fromFile === "") throw new LaunchError(`secret ${name} is not set: the station names it, and this host holds it neither in the environment nor at ${file}`);
     resolved[name] = fromFile;
   }
   return resolved;
+}
+
+/** The secret file's content without its final newline; empty when there is no file, a LaunchError when there is one that cannot be read (its mode, a directory). */
+function readSecretFile(name: string, file: string): string {
+  try {
+    return fs.readFileSync(file, "utf8").replace(/\r?\n$/, "");
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") return "";
+    throw new LaunchError(`secret ${name} cannot be read from ${file}: ${code ?? String(error)}`);
+  }
 }
 
 export interface ClaudeRunnerDeps {

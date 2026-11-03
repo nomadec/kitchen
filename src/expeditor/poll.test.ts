@@ -142,6 +142,23 @@ test("a GitHub source poll with two issues updated since the cursor lays two ord
   ]);
 });
 
+test("a GitHub source with no cursor (registered by hand, or before the cursor was seeded at registration) is seeded with the tick's instant and lists nothing: the tracker's open issues become no orders", async (t) => {
+  const k = kitchen(t, [
+    ...QUIET,
+    sources(source("kitchen-5", "github", "nomadec/kitchen", "")),
+    shown(source("kitchen-5", "github", "nomadec/kitchen", "")),
+    advanced("kitchen-5"),
+  ]);
+
+  assert.equal(await k.run(), 0, k.err.join(""));
+
+  assert.deepEqual(k.gh(), [], "no issue list");
+  assert.deepEqual(k.cursors(), ["target: nomadec/kitchen\nrecipe: umka\nclass: unsorted\ncursor: 2026-01-01T00:00:00Z"]);
+  const seeded = k.log().find((line) => line.step === "sources" && line.seeded);
+  assert.deepEqual({ source: seeded?.source, cursor: seeded?.cursor }, { source: "kitchen-5", cursor: "2026-01-01T00:00:00Z" });
+  assert.deepEqual(k.orders(), []);
+});
+
 test("a JSONL source with three lines and an offset at line one lays an order per remaining line, an issue URL read through gh and free text as itself, and leaves the offset at three", async (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kitchen-intake-"));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));

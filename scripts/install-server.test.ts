@@ -133,6 +133,23 @@ function stubs(dir: string): { bin: string; log: string; calls(): string[] } {
   return { bin, log, calls: () => (fs.existsSync(log) ? fs.readFileSync(log, "utf8").trim().split("\n") : []) };
 }
 
+test("a Dolt download whose checksum is not the pinned one stops the install before it is unpacked or installed", (t) => {
+  const dir = scratch(t);
+  const root = path.join(dir, "root");
+  const s = stubs(dir);
+  // No dolt on the host, and a curl that answers with an archive of the wrong content.
+  fs.rmSync(path.join(s.bin, "dolt"));
+  fs.writeFileSync(path.join(s.bin, "curl"), `#!/bin/bash\nprintf '%s\\n' "curl $*" >> "${s.log}"\nwhile [ $# -gt 0 ]; do [ "$1" = -o ] && printf 'not the release\\n' > "$2"; shift; done\n`, { mode: 0o755 });
+  const env = { PATH: `${s.bin}:${process.env.PATH}`, KITCHEN_SERVER_ROOT: root };
+
+  const r = install(["--interface", "tailscale0", "--users", people(dir, ["sona"])], env);
+
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /checksum mismatch on .*dolt-linux-.*\.tar\.gz: not the pinned release/);
+  assert.ok(s.calls().some((c) => c.startsWith("curl ")), "the archive was fetched");
+  assert.ok(!s.calls().some((c) => c.startsWith("tar ") || c.startsWith("install ")), "nothing is unpacked or installed from it");
+});
+
 test("re-running creates nothing twice, and secrets travel by environment and stdin only", (t) => {
   const dir = scratch(t);
   const root = path.join(dir, "root");

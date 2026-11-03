@@ -14,7 +14,7 @@ import type { LaidPhase } from "../laid.ts";
 import { LOOP } from "../order.ts";
 import { readStations } from "../registered.ts";
 import type { CommandRunner } from "../runner.ts";
-import { openSpace, RefusedError, SpaceError } from "../space.ts";
+import { openSpace, SpaceError } from "../space.ts";
 import type { Space } from "../space.ts";
 import type { Station } from "../station.ts";
 import { APPLIED, applyWord, kitchenLaid } from "./answers.ts";
@@ -157,6 +157,7 @@ export function expeditor(deps: ExpeditorDeps): Expeditor {
 
     sources: async (state) => {
       const polled = await pollSources({
+        clock: deps.clock,
         space: state.space, runner: deps.runner, owner: state.config.owner, host: state.config.host,
         log: (fields) => log(state.report.tick, "sources", fields),
       });
@@ -189,7 +190,15 @@ export function expeditor(deps: ExpeditorDeps): Expeditor {
       const checkouts = [...new Set(state.stations.flatMap((s) => s.launch.repositories.map((r) => r.path)))];
       const holding = new Map<string, string[]>();
       for (const checkout of checkouts) {
-        for (const order of worktreeOrders(checkout)) holding.set(order, [...(holding.get(order) ?? []), checkout]);
+        // A checkout whose worktrees directory cannot be read (gone with the checkout, its mode) is logged and left for the next tick.
+        let orders: string[];
+        try {
+          orders = worktreeOrders(checkout);
+        } catch (error) {
+          log(state.report.tick, "worktrees", { checkout, failed: error instanceof Error ? error.message : String(error) });
+          continue;
+        }
+        for (const order of orders) holding.set(order, [...(holding.get(order) ?? []), checkout]);
       }
       const removed: string[] = [];
       const kept: string[] = [];
@@ -298,22 +307,31 @@ export function expeditor(deps: ExpeditorDeps): Expeditor {
           start.turn,
         );
         endings.push(
-          ending.finally(() => alivePhases.delete(phase.id)).then((end): TurnEnding => {
-            deps.log.write({
-              tick, step: "turn", phase: phase.id, order: phase.order, station: station.title,
-              exit: end.exitCode, result: end.resultLine, outcome: end.outcome,
-              ...(end.failure === undefined ? {} : { failure: end.failure, failures: end.failures }),
-              ...(end.pass === undefined ? {} : { pass: end.pass }),
-            });
-            return end;
-          }, (error: unknown): TurnEnding => {
-            // A bd call the ending needed was refused (bd unreachable, the lease taken elsewhere): the
-            // service goes on, and the phase and its take are bd reclaim's once their leases go stale.
-            if (!(error instanceof SpaceError || error instanceof RefusedError)) throw error;
-            const failed = error.message;
-            deps.log.write({ tick, step: "turn", phase: phase.id, order: phase.order, station: station.title, failed });
-            return { failed };
-          }),
+          ending
+            .finally(() => alivePhases.delete(phase.id))
+            .then((end): TurnEnding => {
+              deps.log.write({
+                tick, step: "turn", phase: phase.id, order: phase.order, station: station.title,
+                exit: end.exitCode, result: end.resultLine, outcome: end.outcome,
+                ...(end.failure === undefined ? {} : { failure: end.failure, failures: end.failures }),
+                ...(end.pass === undefined ? {} : { pass: end.pass }),
+              });
+              return end;
+            })
+            .catch((error: unknown): TurnEnding => {
+              // Nothing awaits an ending but settle(), so a rejection left here would be unhandled and
+              // end the process with every other running turn's child. Whatever the ending threw (a bd
+              // call refused: bd unreachable, the lease taken elsewhere; an answer that parses as no
+              // bead; the log itself) is logged, where the log still takes it, and the service goes on:
+              // the phase and its take are bd reclaim's once their leases go stale.
+              const failed = error instanceof Error ? error.message : String(error);
+              try {
+                deps.log.write({ tick, step: "turn", phase: phase.id, order: phase.order, station: station.title, failed });
+              } catch (unlogged) {
+                process.stderr.write(`turn ${phase.id} ended with ${failed}; the log refused the line: ${unlogged instanceof Error ? unlogged.message : String(unlogged)}\n`);
+              }
+              return { failed };
+            }),
         );
       }
       log(state.report.tick, "dispatch", { started: state.report.started.map((t) => t.phase.id) });

@@ -4,6 +4,7 @@
 // order, so the cursor is the whole state of a poll: an interruption between an order and its advance
 // lists the item again on the next tick, where the duplicate check, not a second order, answers it.
 import fs from "node:fs";
+import type { Clock } from "../clock.ts";
 import { intake } from "../intake.ts";
 import type { IntakeResult } from "../intake.ts";
 import { readItem } from "../item.ts";
@@ -22,6 +23,7 @@ export interface PollDeps {
   /** The space under the expeditor actor: the reads, the orders and the cursor. */
   space: Space;
   runner: CommandRunner;
+  clock: Clock;
   owner: string;
   host: string;
   /** One log line per item and per failure, under the `sources` step. */
@@ -60,6 +62,14 @@ export async function pollSources(deps: PollDeps): Promise<PollReport> {
     const bead = { id: source.id, issue_type: "source" };
     let current: string | undefined;
     try {
+      if (source.kind === "github" && source.cursor === "") {
+        // A github source with no cursor (registered by hand, or edited): it starts now, as
+        // `kitchen source add` starts one, rather than listing every open issue of the tracker.
+        const seeded = instant(deps.clock.now());
+        await deps.space.setNote(bead, "cursor", seeded);
+        deps.log({ source: source.id, cursor: seeded, seeded: "no cursor: the source starts now; kitchen source add --since moves it back" });
+        continue;
+      }
       for (const polled of await since(deps.runner, source)) {
         if ("dropped" in polled) {
           await deps.space.setNote(bead, "cursor", polled.cursor);
@@ -79,6 +89,11 @@ export async function pollSources(deps: PollDeps): Promise<PollReport> {
     }
   }
   return report;
+}
+
+/** An instant as a github cursor reads: seconds, no fraction, as `kitchen source add` writes it. */
+function instant(date: Date): string {
+  return date.toISOString().replace(/\.\d{3}Z$/, "Z");
 }
 
 function outcome(result: IntakeResult): Record<string, unknown> {

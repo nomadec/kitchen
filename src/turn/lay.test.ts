@@ -72,6 +72,10 @@ const children = (...rows: object[]): ScriptedAnswer => ({ command: "bd", args: 
 const created = (id: string, title: string, type = "task"): ScriptedAnswer => ({
   command: "bd", args: [...TURN, "create", title], stdout: JSON.stringify({ id, title, status: "open", issue_type: type }),
 });
+/** An open pass of kitchen-20 as `bd show` prints it. */
+const passShown = (id: string): ScriptedAnswer => ({
+  command: "bd", args: [...TURN, "show", id], stdout: JSON.stringify([{ id, title: "rounds reached: review", status: "open", issue_type: "gate", await_type: "human", parent: "kitchen-20" }]),
+});
 const child = (id: string, slug: string, status: string, title = `${slug}: Stale cookie`) => ({
   id, title, status, issue_type: "task", parent: "kitchen-20", assignee: "sona/oven", labels: [`phase:${slug}`, "station:sona/oven"], notes: "model: claude-opus-5",
 });
@@ -196,6 +200,7 @@ test("lay phase --behind <pass>: the phase is laid blocked by the pass and the r
   const review = registered({ slug: "review", text: PHASE("review", "rounds: 2\n", "[pr, address]", "[decide-blocking]") });
   const k = turn(t, [
     order(), phases(review), stations(OVEN),
+    passShown("kitchen-28"),
     children(child("kitchen-26", "review", "closed", "review: round 1"), child("kitchen-27", "review", "closed", "review: round 2")),
     created("kitchen-29", "review: round 3"),
   ]);
@@ -206,6 +211,21 @@ test("lay phase --behind <pass>: the phase is laid blocked by the pass and the r
   const create = k.bd().find((argv) => argv[0] === "create");
   assert.deepEqual(create?.slice(-3), ["--deps", "blocked-by:kitchen-28", "--json"]);
   assert.equal(k.out.join(""), "Laid review as kitchen-29 at sona/oven, blocked by kitchen-28\n");
+});
+
+test("lay phase --behind: only an open pass of this order passes the cap over; a task, a closed pass or another order's pass is refused before any write", async (t) => {
+  const review = registered({ slug: "review", text: PHASE("review", "rounds: 2\n", "[pr, address]", "[decide-blocking]") });
+  const cases: [object, string][] = [
+    [{ id: "kitchen-28", title: "review: round 2", status: "open", issue_type: "task", parent: "kitchen-20" }, "--behind kitchen-28: not a pass (a human gate), so no word on it grants a round"],
+    [{ id: "kitchen-28", title: "rounds reached: review", status: "closed", issue_type: "gate", await_type: "human", parent: "kitchen-20" }, "--behind kitchen-28: the pass is closed already"],
+    [{ id: "kitchen-28", title: "rounds reached: review", status: "open", issue_type: "gate", await_type: "human", parent: "kitchen-30" }, "--behind kitchen-28: the pass is not kitchen-20's"],
+  ];
+  for (const [bead, refusal] of cases) {
+    const k = turn(t, [order(), phases(review), stations(OVEN), { command: "bd", args: [...TURN, "show", "kitchen-28"], stdout: JSON.stringify([bead]) }]);
+    assert.equal(await k.run("phase", "kitchen-20", "review", "--station", "sona/oven", "--why", "x", "--title", "round 3", "--behind", "kitchen-28"), 2);
+    assert.equal(k.err.join(""), `lay: ${refusal}\n`);
+    assert.equal(k.writes().length, 0);
+  }
 });
 
 test("lay phase: a pass phase is never worked, so laying it as a phase is refused and lay pass is named", async (t) => {

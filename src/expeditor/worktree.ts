@@ -56,14 +56,15 @@ export const FORWARDED_HOOKS: readonly string[] = [
 
 /**
  * The lines every hook under `.kitchen/hooks` starts with: find the repository's own hooks directory
- * (its `core.hooksPath`, global or in the repository's config, else `.git/hooks`; a relative path is
- * relative to the main checkout) and run the hook of the same name there when it exists.
+ * (its `core.hooksPath` in the repository's config, else the global one, else the system one, else
+ * `.git/hooks`; a relative path stays relative, since git runs a hook from the root of the working
+ * tree and reads a relative `core.hooksPath` from there) and run the hook of the same name there when
+ * it exists.
  */
 const FORWARD = `#!/bin/sh
 # Kitchen: runs the repository's own hook of this name, so the worktree keeps every hook the project or beads installed.
 common="$(git rev-parse --git-common-dir)"
-hooks="$(git config --file "$common/config" core.hooksPath 2>/dev/null || git config --global core.hooksPath 2>/dev/null || echo "$common/hooks")"
-case "$hooks" in /*) ;; *) hooks="$(cd "$common/.." && pwd)/$hooks" ;; esac
+hooks="$(git config --file "$common/config" core.hooksPath 2>/dev/null || git config --global core.hooksPath 2>/dev/null || git config --system core.hooksPath 2>/dev/null || echo "$common/hooks")"
 name="$(basename "$0")"
 if [ -x "$hooks/$name" ]; then "$hooks/$name" "$@" || exit $?; fi
 `;
@@ -85,6 +86,8 @@ export async function ensureWorktree(runner: CommandRunner, checkout: Checkout, 
   const worktree: Worktree = { slug: checkout.slug, checkout: checkout.path, path: worktreePath(checkout.path, order) };
   const remote = `origin/${branch}`;
   await git(checkout.path, ["fetch", "origin"]);
+  // Written on every turn, reused worktree or not, so the hooks are the ones this version forwards.
+  writeTrailerHook(checkout.path);
   const pushed = (await git(checkout.path, ["rev-parse", "--verify", "--quiet", `refs/remotes/${remote}`], { tolerate: true })).exitCode === 0;
   if (fs.existsSync(worktree.path)) {
     if (pushed) await git(worktree.path, ["merge", "--ff-only", remote]);
@@ -102,7 +105,6 @@ export async function ensureWorktree(runner: CommandRunner, checkout: Checkout, 
   await git(worktree.path, ["config", "--worktree", "user.name", station.owner]);
   await git(worktree.path, ["config", "--worktree", "kitchen.station", station.title]);
   await git(worktree.path, ["config", "--worktree", "core.hooksPath", hooksPath(checkout.path)]);
-  writeTrailerHook(checkout.path);
   return worktree;
 }
 

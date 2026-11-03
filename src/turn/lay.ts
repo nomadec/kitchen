@@ -4,8 +4,8 @@
 // wrapper as `<owner>/<station>`. What it judges is mechanical only: the station chosen by the driver
 // lists the phase's model and every repository the order names; a phase is laid from the order's pinned
 // revision, or pins the recipe an edge crosses into; a pass phase is never laid as a phase; the rounds
-// cap is counted, and passed over only for a phase laid behind a pass (`--behind`), where the person's
-// word grants the round; a phase laid with no `--station` waits unassigned behind a `no station for`
+// cap is counted, and passed over only for a phase laid behind an open pass of the order (`--behind`),
+// where the person's word grants the round; a phase laid with no `--station` waits unassigned behind a `no station for`
 // pass for the person's `retry <station>`; a pass is never closed. The prose judgments (needs against
 // offers, `when`, `skip when`, the answer on a pass) stay with the driver.
 import { parseActor } from "../actor.ts";
@@ -139,6 +139,7 @@ const SUBCOMMANDS: Record<string, Subcommand> = {
     const found = await registeredPhase(space, orderBead, slug);
     if (isPass(found.phase)) throw new LayRefusal(`${slug} is a pass phase (skill: human): lay it with lay pass`);
     const station = stationTitle === undefined ? undefined : await qualifyingStation(space, stationTitle, found.phase, order);
+    if (behind !== undefined) await openPassOf(space, behind, order.id);
     const children = await space.list({ parent: order.id, all: true });
 
     const title = `${slug}: ${qualifier ?? order.title}`;
@@ -312,6 +313,15 @@ async function qualifyingStation(space: Space, title: string, phase: Phase, orde
   const gap = lacks(station, { model: phase.model, repos: order.repos });
   if (gap.length) throw new LayRefusal(`no station for ${phase.slug} at ${title}: it lacks ${gap.join(", ")}`);
   return station;
+}
+
+/** The pass `--behind` names, when it is an open human gate of this order: only a person's word on one of those grants a round past the cap. */
+async function openPassOf(space: Space, id: string, order: string): Promise<Bead> {
+  const bead = await space.show(id);
+  if (bead.issue_type !== "gate" || bead.await_type !== "human") throw new LayRefusal(`--behind ${id}: not a pass (a human gate), so no word on it grants a round`);
+  if (bead.status === "closed") throw new LayRefusal(`--behind ${id}: the pass is closed already`);
+  if (bead.parent !== order) throw new LayRefusal(`--behind ${id}: the pass is not ${order}'s`);
+  return bead;
 }
 
 async function readStdin(deps: LayDeps): Promise<string> {

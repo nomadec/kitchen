@@ -307,7 +307,7 @@ test("a station naming secrets has each resolved on this host into the child's e
   assert.ok(!fs.readFileSync(k.logFile, "utf8").includes("fromenv"), "the log carries no secret value");
 });
 
-test("a secret the host holds nowhere refuses the start: the claims are released, the phase is dropped naming the file that would hold it, and no child is spawned", async (t) => {
+test("a secret the host holds nowhere refuses the start: the phase is open again for its station (not released unassigned, which no ready list would show), the take is released, the phase is dropped naming the file that would hold it, and no child is spawned", async (t) => {
   const row = station("kitchen-10", "oven", 2);
   const k = kitchen(t, [
     stations({ ...row, notes: row.notes.replace('"secrets":[]', '"secrets":["GITHUB_TOKEN"]') }),
@@ -316,7 +316,7 @@ test("a secret the host holds nowhere refuses the start: the claims are released
     running("oven"),
     claimed("oven", "kitchen-20"),
     claimed("oven", "kitchen-21"),
-    released("oven", "kitchen-21"),
+    { command: "bd", args: ["--actor", "sona/oven", "update", "kitchen-21"], stdout: "[]" },
     released("oven", "kitchen-20"),
   ]);
 
@@ -326,11 +326,34 @@ test("a secret the host holds nowhere refuses the start: the claims are released
   assert.deepEqual(k.bd().filter((argv) => argv[2] === "update").map((argv) => argv.slice(3)), [
     ["kitchen-20", "--claim", "--json"],
     ["kitchen-21", "--claim", "--json"],
-    ["kitchen-21", "--status", "open", "--assignee", "", "--json"],
+    ["kitchen-21", "--assignee", "sona/oven", "--status", "open", "--json"],
     ["kitchen-20", "--status", "open", "--assignee", "", "--json"],
   ]);
   const dropped = k.log().find((line) => line.step === "dispatch" && line.dropped);
   assert.equal(dropped?.dropped, `secret GITHUB_TOKEN is not set: the station names it, and this host holds it neither in the environment nor at ${path.join(k.configDir, "secrets", "GITHUB_TOKEN")}`);
+});
+
+test("a secret file the host cannot read (a directory in its place) refuses the start the same way, naming the file and the error, rather than throwing out of the tick", async (t) => {
+  const row = station("kitchen-10", "oven", 2);
+  const k = kitchen(t, [
+    stations({ ...row, notes: row.notes.replace('"secrets":[]', '"secrets":["GITHUB_TOKEN"]') }),
+    ready("oven", phase("kitchen-21", "kitchen-20", "reproduce", "oven")),
+    held(),
+    running("oven"),
+    claimed("oven", "kitchen-20"),
+    claimed("oven", "kitchen-21"),
+    { command: "bd", args: ["--actor", "sona/oven", "update", "kitchen-21", "--assignee", "sona/oven", "--status", "open"], stdout: "[]" },
+    released("oven", "kitchen-20"),
+  ]);
+  const file = path.join(k.configDir, "secrets", "GITHUB_TOKEN");
+  fs.mkdirSync(file, { recursive: true });
+
+  assert.equal(await k.run(), 0, k.err.join(""));
+
+  assert.equal(k.claude().length, 0);
+  const dropped = k.log().find((line) => line.step === "dispatch" && line.dropped);
+  assert.equal(dropped?.dropped, `secret GITHUB_TOKEN cannot be read from ${file}: EISDIR`);
+  assert.ok(k.log().some((line) => line.step === "dispatch" && line.started), "the tick ran to its end");
 });
 
 test("a session that prints nothing has its exit code commented as the result line", async (t) => {

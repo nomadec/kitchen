@@ -59,7 +59,7 @@ The template argument is the file, or a plugin directory holding `station.json`.
 | `--owner <person>` | The station's owner | the host config's owner |
 | `--host <hostname>` | The host the station runs on | the host config's host |
 | `--offers <prose>` | What the station offers | the template's |
-| `--secret <name>` | The name of a secret the host resolves at launch, repeatable. Names only; the value never reaches the space. At launch the expeditor reads each name from its own environment, else from the file `~/.config/kitchen/secrets/<name>` (`$XDG_CONFIG_HOME/kitchen/secrets/<name>`; the value is its content, trailing newline dropped), into the session's environment, and refuses the start when a name is set nowhere, naming the file. A user service has a minimal environment, so the file is the usual place | none |
+| `--secret <name>` | The name of a secret the host resolves at launch, repeatable. Names only; the value never reaches the space. At launch the expeditor reads each name from its own environment, else from the file `~/.config/kitchen/secrets/<name>` (`$XDG_CONFIG_HOME/kitchen/secrets/<name>`; the value is its content, trailing newline dropped), into the session's environment, and refuses the start when a name is set nowhere, naming the file, or when the file cannot be read (its mode, a directory in its place), naming the error. A refused start sets the phase open again for its station and releases the order's take, so the phase is listed as ready on the next tick and starts once the host holds the secret; the refusal is on the tick's `dispatch` line each time. A user service has a minimal environment, so the file is the usual place | none |
 | `--attended` | A human sits at this station; the expeditor never starts its turns, `kitchen turn` does | unattended |
 
 A missing required value is refused naming it, before any `bd` call. A `--repo` for a slug the template does not offer is refused too.
@@ -119,7 +119,7 @@ class: unsorted
 cursor:
 ```
 
-The cursor is empty until the first poll; the expeditor sets it on the bead after each order it lays, so moving the source to another host (`--host`, or editing the label) loses nothing. For a `github` source it is the `updatedAt` of the last issue polled; for a `file` source it is the number of lines of the JSONL file already behind it. The poll itself, and why the cursor advances after each order and not before, is in `docs/intake.md`.
+The cursor of a `github` source is the registration instant (`--since` moves it back) and then the `updatedAt` of the last issue polled; a `file` source's is empty until the first poll and then the number of lines of the JSONL file already behind it. The expeditor sets it on the bead after each order it lays, so moving the source to another host (`--host`, or editing the label) loses nothing; a `github` source found with no cursor is seeded with the tick's instant on its first poll. The poll itself, and why the cursor advances after each order and not before, is in `docs/intake.md`.
 
 ## Reading them back
 

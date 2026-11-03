@@ -19,12 +19,13 @@
     "plugin"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --test \"src/**/*.test.ts\" \"scripts/**/*.test.ts\""
+    "build": "tsc -p tsconfig.build.json && esbuild ui/app.ts ui/index.html --bundle --format=esm --platform=browser --target=es2022 --outdir=dist/ui --loader:.html=copy --sourcemap",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.ui.json --noEmit",
+    "test": "node --test \"src/**/*.test.ts\" \"scripts/**/*.test.ts\" \"ui/**/*.test.ts\""
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "esbuild": "^0.28.2",
     "typescript": "^5.9.0"
   }
 }

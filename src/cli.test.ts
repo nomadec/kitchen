@@ -6,7 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { main } from "./cli.ts";
 import type { CliDeps } from "./cli.ts";
-import { fakeClock, fakeRunner } from "./testing/index.ts";
+import { fakeClock, fakeRunner, TEST_PROGRAM } from "./testing/index.ts";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const bin = path.join(here, "bin", "kitchen.ts");
@@ -32,7 +32,7 @@ function kitchen() {
     clock: fakeClock(),
     env: {},
     hostname: "oven",
-    program: { platform: "linux", argv: ["/usr/bin/node", "/opt/kitchen/dist/bin/kitchen.js"], pluginDir: "/opt/kitchen/plugin" },
+    program: { platform: "linux", ...TEST_PROGRAM },
     stdout: () => {},
     stderr: (text) => err.push(text),
   };

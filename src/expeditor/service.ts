@@ -11,6 +11,9 @@ const LAUNCHD_LABEL = "ai.nomadec.kitchen.expeditor";
 /** Seconds between ticks when `kitchen up` is given no interval. */
 export const DEFAULT_INTERVAL = 5;
 
+/** The loopback port the expeditor serves the UI on when `kitchen up` is given no port; bd serve takes the next one. */
+export const DEFAULT_PORT = 4817;
+
 /** The environment entries the service carries over from the shell `kitchen up` ran in. */
 const CARRIED_ENV = ["PATH", "XDG_CONFIG_HOME", "XDG_STATE_HOME"] as const;
 
@@ -20,6 +23,8 @@ export interface ServiceSpec {
   env: Record<string, string | undefined>;
   /** Seconds between ticks; the default when the caller only needs the unit's file and stop commands. */
   interval?: number;
+  /** The UI port; the default when the caller only needs the unit's file and stop commands. */
+  port?: number;
 }
 
 export interface ServiceUnit {
@@ -43,7 +48,7 @@ export class ServiceError extends Error {
 }
 
 export function serviceUnit(spec: ServiceSpec): ServiceUnit {
-  const command = [...spec.program.argv, "up", "--foreground", "--interval", String(spec.interval ?? DEFAULT_INTERVAL)];
+  const command = [...spec.program.argv, "up", "--foreground", "--interval", String(spec.interval ?? DEFAULT_INTERVAL), "--port", String(spec.port ?? DEFAULT_PORT)];
   const environment = CARRIED_ENV.flatMap((name) => {
     const value = spec.env[name];
     return value === undefined ? [] : [[name, value] as const];

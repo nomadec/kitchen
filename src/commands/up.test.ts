@@ -22,11 +22,11 @@ test("on Linux, kitchen up writes the systemd user unit running kitchen up --for
   const k = kitchen(t, SYSTEMD);
   const unit = path.join(k.home, ".config", "systemd", "user", "kitchen-expeditor.service");
 
-  assert.equal(await k.run("up", "--interval", "3"), 0, k.err.join(""));
+  assert.equal(await k.run("up", "--interval", "3", "--port", "4817"), 0, k.err.join(""));
 
   const content = fs.readFileSync(unit, "utf8");
   assert.match(content, /^\[Unit\]\nDescription=Kitchen expeditor on sona-laptop\n/);
-  assert.match(content, /\nExecStart=\/usr\/bin\/node \/opt\/kitchen\/dist\/bin\/kitchen\.js up --foreground --interval 3\n/);
+  assert.match(content, /\nExecStart=\/usr\/bin\/node \/opt\/kitchen\/dist\/bin\/kitchen\.js up --foreground --interval 3 --port 4817\n/);
   assert.match(content, /\nRestart=on-failure\n/);
   assert.match(content, /\nEnvironment=PATH=\/usr\/local\/bin:\/usr\/bin\n/);
   assert.match(content, new RegExp(`\nEnvironment=XDG_CONFIG_HOME=${path.join(k.home, ".config")}\n`));
@@ -35,7 +35,7 @@ test("on Linux, kitchen up writes the systemd user unit running kitchen up --for
     ["systemctl", "--user", "daemon-reload"],
     ["systemctl", "--user", "enable", "--now", "kitchen-expeditor.service"],
   ]);
-  assert.match(k.out.join(""), new RegExp(`Wrote ${unit} and started the expeditor; its log is ${path.join(k.home, ".local", "state", "kitchen", "expeditor.jsonl")}\n`));
+  assert.match(k.out.join(""), new RegExp(`Wrote ${unit} and started the expeditor; its log is ${path.join(k.home, ".local", "state", "kitchen", "expeditor.jsonl")}; the UI is http://127.0.0.1:4817\n`));
 
   assert.equal(await k.run("down"), 0, k.err.join(""));
 
@@ -55,7 +55,7 @@ test("on macOS, kitchen up writes the launchd agent and loads it; kitchen down u
 
   const content = fs.readFileSync(plist, "utf8");
   assert.match(content, /<key>Label<\/key>\n\s*<string>ai\.nomadec\.kitchen\.expeditor<\/string>/);
-  assert.match(content, /<key>ProgramArguments<\/key>\n\s*<array>\n\s*<string>\/usr\/bin\/node<\/string>\n\s*<string>\/opt\/kitchen\/dist\/bin\/kitchen\.js<\/string>\n\s*<string>up<\/string>\n\s*<string>--foreground<\/string>\n\s*<string>--interval<\/string>\n\s*<string>5<\/string>\n\s*<\/array>/);
+  assert.match(content, /<key>ProgramArguments<\/key>\n\s*<array>\n\s*<string>\/usr\/bin\/node<\/string>\n\s*<string>\/opt\/kitchen\/dist\/bin\/kitchen\.js<\/string>\n\s*<string>up<\/string>\n\s*<string>--foreground<\/string>\n\s*<string>--interval<\/string>\n\s*<string>5<\/string>\n\s*<string>--port<\/string>\n\s*<string>4817<\/string>\n\s*<\/array>/);
   assert.match(content, /<key>KeepAlive<\/key>\n\s*<true\/>/);
   assert.match(content, /<key>PATH<\/key>\n\s*<string>\/usr\/local\/bin:\/usr\/bin<\/string>/);
   assert.deepEqual(k.argv(), [["launchctl", "load", "-w", plist]]);
@@ -103,6 +103,7 @@ const QUIET_TICK: ScriptedAnswer[] = [
   { command: "bd", args: ["--actor", "sona/expeditor", "list", "--type", "gate"], stdout: "[]" },
   { command: "bd", args: ["--actor", "sona/expeditor", "reclaim", "--json"], stdout: '{"count":0,"reclaimed":null}' },
   { command: "bd", args: ["--actor", "sona/expeditor", "list", "--type", "epic"], stdout: "[]" },
+  { command: "bd", args: ["serve"] },
 ];
 
 test("kitchen up --foreground keeps the expeditor's state file current: written after every tick with the tick count and the instant, and marked stopped when the service is told to stop", async (t) => {
@@ -110,7 +111,7 @@ test("kitchen up --foreground keeps the expeditor's state file current: written 
   const stateFile = path.join(k.home, ".local", "state", "kitchen", "expeditor.json");
   const state = () => JSON.parse(fs.readFileSync(stateFile, "utf8")) as Record<string, unknown>;
 
-  const running = k.run("up", "--foreground", "--interval", "2");
+  const running = k.run("up", "--foreground", "--interval", "2", "--port", "0");
   for (let turns = 0; !fs.existsSync(stateFile) || (state().tick as number) < 2; turns++) {
     assert.ok(turns < 1000, `no second tick recorded at ${stateFile}`);
     await new Promise((resolve) => setImmediate(resolve));
@@ -133,4 +134,53 @@ test("kitchen up --foreground keeps the expeditor's state file current: written 
   assert.equal(await once.run("up", "--foreground", "--once"), 0, once.err.join(""));
   const afterOnce = JSON.parse(fs.readFileSync(path.join(once.home, ".local", "state", "kitchen", "expeditor.json"), "utf8")) as Record<string, unknown>;
   assert.deepEqual({ tick: afterOnce.tick, stopped: afterOnce.stopped }, { tick: 1, stopped: "2026-01-01T00:00:00.000Z" });
+});
+
+test("the running expeditor serves bd serve on loopback with a token file it owns, mode 0600, over the space connection, and the UI on its port; the stop that kitchen down sends ends both", async (t) => {
+  const k = kitchen(t, QUIET_TICK);
+  const tokenFile = path.join(k.home, ".local", "state", "kitchen", "serve.token");
+  const logFile = path.join(k.home, ".local", "state", "kitchen", "expeditor.jsonl");
+  const log = (): Record<string, unknown>[] =>
+    fs.existsSync(logFile) ? fs.readFileSync(logFile, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>) : [];
+  const servedLine = () => log().find((line) => line.step === "serve" && typeof line.ui === "string");
+
+  const running = k.run("up", "--foreground", "--interval", "2", "--port", "0");
+  for (let turns = 0; !servedLine(); turns++) {
+    assert.ok(turns < 1000, "the serve step never logged where the UI listens");
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  const served = servedLine() as Record<string, unknown>;
+  assert.match(served.ui as string, /^http:\/\/127\.0\.0\.1:\d+$/, "the UI is bound to loopback");
+  assert.equal(served.api, "http://127.0.0.1:4818");
+  assert.equal(served.token, tokenFile);
+  assert.deepEqual(await (await fetch(`${served.ui}/me`)).json(), { owner: "sona", host: "sona-laptop" }, "the UI server answers while the expeditor runs");
+
+  const serve = k.runner.calls.find((c) => c.argv[0] === "bd" && c.argv[1] === "serve");
+  assert.ok(serve, "bd serve was issued");
+  assert.deepEqual(serve.argv, ["bd", "serve", "--addr", "127.0.0.1:4818", "--auth-token-file", tokenFile]);
+  assert.deepEqual({ cwd: serve.cwd, env: serve.env }, k.connection, "bd serve runs over the space connection, like every bd call");
+  assert.ok(serve.signal instanceof AbortSignal && !serve.signal.aborted, "bd serve runs until the expeditor is told to stop");
+  assert.equal(fs.statSync(tokenFile).mode & 0o777, 0o600);
+  assert.match(fs.readFileSync(tokenFile, "utf8"), /^[0-9a-f]{64}\n$/, "one token per line, as bd serve reads it");
+
+  process.emit("SIGTERM");
+  assert.equal(await running, 0, k.err.join(""));
+
+  assert.ok(serve.signal.aborted, "bd serve is stopped with the expeditor");
+  await assert.rejects(fetch(`${served.ui}/me`), "the UI server is closed once the expeditor has exited");
+  assert.deepEqual(log().at(-1), { at: log().at(-1)?.at, step: "serve", stopped: true });
+});
+
+test("kitchen up --foreground --once runs one tick and serves nothing: no bd serve, no UI port", async (t) => {
+  const k = kitchen(t, QUIET_TICK);
+  assert.equal(await k.run("up", "--foreground", "--once"), 0, k.err.join(""));
+  assert.ok(!k.runner.calls.some((c) => c.argv[0] === "bd" && c.argv[1] === "serve"));
+  assert.ok(!fs.existsSync(path.join(k.home, ".local", "state", "kitchen", "serve.token")));
+});
+
+test("a port that is not a whole number is refused naming the gap, before any call", async (t) => {
+  const k = kitchen(t, SYSTEMD);
+  assert.notEqual(await k.run("up", "--port", "web"), 0);
+  assert.match(k.err.at(-1) ?? "", /--port must be a whole number from 0 to 65535, got web/);
+  assert.equal(k.runner.calls.length, 0);
 });

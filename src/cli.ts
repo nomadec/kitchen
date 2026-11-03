@@ -21,6 +21,8 @@ export interface Program {
   argv: readonly string[];
   /** The Kitchen plugin directory the runner loads into every session: the turn driver and the Stop hook. */
   pluginDir: string;
+  /** The bundled UI the expeditor serves as static files: `npm run build` writes it under dist/ui. */
+  uiDir: string;
 }
 
 export interface CliDeps {

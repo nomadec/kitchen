@@ -2,14 +2,14 @@
 // against the latest revision of every other recipe in the space. A human act (story 33).
 import { parseArgs } from "node:util";
 import type { Command } from "../cli.ts";
-import { actorName, resolveActor } from "../actor.ts";
+import { actorName, resolveActor, RULE } from "../actor.ts";
 import { readHostConfig } from "../config.ts";
 import { discover, fetchBundle, BundleError, revisionOf } from "../recipe/bundle.ts";
 import type { Bundle } from "../recipe/bundle.ts";
 import { describeFinding, lintBundle } from "../recipe/lint.ts";
 import type { RegisteredPhase } from "../recipe/lint.ts";
 import { parsePhaseFile, PhaseError, phaseTitle, slugOf, splitTitle } from "../recipe/phase.ts";
-import { openSpace, RefusedError, RULE } from "../space.ts";
+import { openSpace, RefusedError } from "../space.ts";
 import type { Bead } from "../space.ts";
 
 const USAGE = `Usage: kitchen recipe add <plugin-dir|file|url> [--recipe <name>]

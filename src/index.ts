@@ -2,9 +2,9 @@
 // and the registered stations and sources in both directions.
 export { main, help, COMMANDS } from "./cli.ts";
 export type { CliDeps, Command } from "./cli.ts";
-export { humanActor, stationActor, expeditorActor, actorName, parseActor, resolveActor } from "./actor.ts";
+export { humanActor, stationActor, expeditorActor, actorName, parseActor, resolveActor, RULE } from "./actor.ts";
 export type { Actor } from "./actor.ts";
-export { openSpace, RefusedError, SpaceError, REGISTERED_TYPES, RULE } from "./space.ts";
+export { openSpace, RefusedError, SpaceError, REGISTERED_TYPES } from "./space.ts";
 export type { Space, SpaceDeps, Bead, BeadRef, CreateFields, UpdateFields, ReadyFilter, ListFilter, BeadFilter, GateFields, GateCheck, JournalEvent } from "./space.ts";
 export { parsePhaseFile, isPass, slugOf, phaseTitle, splitTitle, PhaseError, PHASE_KEYS } from "./recipe/phase.ts";
 export type { Phase, Edge, Budget } from "./recipe/phase.ts";

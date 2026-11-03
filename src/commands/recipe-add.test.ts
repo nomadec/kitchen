@@ -8,7 +8,7 @@ import path from "node:path";
 import { main } from "../cli.ts";
 import type { CliDeps } from "../cli.ts";
 import { writeHostConfig } from "../config.ts";
-import { fakeClock, fakeRunner } from "../testing/index.ts";
+import { fakeClock, fakeRunner, TEST_PROGRAM } from "../testing/index.ts";
 import type { ScriptedAnswer } from "../testing/index.ts";
 
 interface Scope {
@@ -30,7 +30,7 @@ function kitchen(t: Scope, table: readonly ScriptedAnswer[], sessionEnv: Record<
   const runner = fakeRunner(table);
   const deps: CliDeps = {
     runner, clock: fakeClock(), env, hostname: "sona-laptop",
-    program: { platform: "linux", argv: ["/usr/bin/node", "/opt/kitchen/dist/bin/kitchen.js"], pluginDir: "/opt/kitchen/plugin" },
+    program: { platform: "linux", ...TEST_PROGRAM },
     stdout: (s) => out.push(s), stderr: (s) => err.push(s),
   };
   return { home, run: (...argv: string[]) => main(argv, deps), runner, out, err };

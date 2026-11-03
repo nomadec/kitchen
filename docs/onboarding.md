@@ -98,7 +98,7 @@ A host is a machine with one expeditor and the stations registered on it. Each h
    kitchen up
    ```
 
-   On Linux this installs a systemd user service, on macOS a launchd agent; `kitchen down` removes it. The expeditor polls the space for phases assigned to this host's stations, starts unattended ones up to each station's cap, and lists attended ones as waiting for you to run with `kitchen turn <phase>`.
+   On Linux this installs a systemd user service, on macOS a launchd agent; `kitchen down` removes it. The expeditor polls the space for phases assigned to this host's stations, starts unattended ones up to each station's cap, and lists attended ones as waiting for you to run with `kitchen turn <phase>`. It also serves the UI on `http://127.0.0.1:4817` and runs `bd serve` behind a token it writes to `~/.local/state/kitchen/serve.token`; paste that token into the page once. `docs/ui.md` says how to reach the page from a phone.
 
 5. `kitchen status` now shows the expeditor running with its last tick, this host's stations with their caps, running turns, waiting attended phases and open passes. The host is in.
 

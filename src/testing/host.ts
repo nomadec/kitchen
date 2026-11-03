@@ -41,6 +41,7 @@ export interface HostOptions {
 export const TEST_PROGRAM = {
   argv: ["/usr/bin/node", "/opt/kitchen/dist/bin/kitchen.js"],
   pluginDir: "/opt/kitchen/plugin",
+  uiDir: "/opt/kitchen/dist/ui",
 } as const;
 
 /** A host with its config written, removed when the test ends. */

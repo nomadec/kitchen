@@ -1,8 +1,9 @@
 // The one door to the space: every bd call Kitchen makes is built here, under one actor, over the
 // connection kitchen init wrote from the host config (the beads workspace and the credential file).
+// The one bd process built elsewhere is `bd serve` (expeditor/serve.ts), over the same connection.
 // Thin argv builders over bd 1.3.1; the refusals are the cooperative rules of docs/trust-model.md,
 // judged before any call is issued.
-import { actorName } from "./actor.ts";
+import { actorName, RULE } from "./actor.ts";
 import type { Actor } from "./actor.ts";
 import { spaceDir } from "./config.ts";
 import type { HostConfig } from "./config.ts";
@@ -180,14 +181,17 @@ export interface ReclaimedLease {
   [field: string]: unknown;
 }
 
-/** The pointer every refusal ends with. */
-export const RULE = "a cooperative rule, not a security boundary: docs/trust-model.md";
+
+/** The connection every bd call runs over: the beads workspace as its cwd, the credential file in its env. */
+export function spaceConnection(env: Record<string, string | undefined>, config: Pick<HostConfig, "credential">): { cwd: string; env: { BEADS_CREDENTIALS_FILE: string } } {
+  return { cwd: spaceDir(env), env: { BEADS_CREDENTIALS_FILE: config.credential } };
+}
 
 export function openSpace(deps: SpaceDeps): Space {
   const name = actorName(deps.actor);
   const station = deps.actor.kind === "station";
   const person = deps.actor.kind === "human";
-  const connection = { cwd: spaceDir(deps.env), env: { BEADS_CREDENTIALS_FILE: deps.config.credential } };
+  const connection = spaceConnection(deps.env, deps.config);
 
   async function bd(args: readonly string[]): Promise<CommandResult> {
     const argv = ["bd", "--actor", name, ...args];

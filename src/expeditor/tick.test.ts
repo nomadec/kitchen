@@ -258,12 +258,14 @@ test("the turn's result line, the last line of its output, is appended as a comm
     [...EXPEDITOR, "comments", "add", "kitchen-21", "kitchen-21 closed: https://github.com/nomadec/kitchen/pull/9", "--json"],
     ["--actor", "sona/oven", "update", "kitchen-20", "--status", "open", "--assignee", "", "--json"],
   ]);
-  const steps = k.log().map((line) => line.step);
+  // The serve lines (where the UI and bd serve listen) belong to the process, not to a tick.
+  const tickLines = k.log().filter((line) => "tick" in line);
+  const steps = tickLines.map((line) => line.step);
   const firstOf = (step: string) => steps.indexOf(step);
   const expected = ["config", "stations", "gates", "passes", "sources", "leases", "reclaim", "worktrees", "ready", "orders", "caps", "attended", "dispatch", "turn"];
   assert.deepEqual([...new Set(steps)], expected, "every step logs, in tick order");
   assert.ok(expected.every((step, i) => i === 0 || firstOf(step) > firstOf(expected[i - 1] ?? "")));
-  for (const line of k.log()) {
+  for (const line of tickLines) {
     assert.equal(line.tick, 1);
     assert.match(String(line.at), /^2026-01-01T00:00:00\.000Z$/);
   }

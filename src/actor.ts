@@ -9,6 +9,9 @@ export type Actor =
 
 export const EXPEDITOR = "expeditor";
 
+/** The pointer every refusal of the cooperative rules ends with, in the CLI, the bd wrapper and the UI alike. */
+export const RULE = "a cooperative rule, not a security boundary: docs/trust-model.md";
+
 export function humanActor(owner: string): Actor {
   return { kind: "human", owner };
 }

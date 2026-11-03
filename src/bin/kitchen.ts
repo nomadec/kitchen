@@ -19,6 +19,8 @@ process.exitCode = await main(process.argv.slice(2), {
     argv: [process.execPath, script],
     // <package>/dist/bin/kitchen.js and <package>/src/bin/kitchen.ts both sit two levels under the package root.
     pluginDir: path.resolve(path.dirname(script), "..", "..", "plugin"),
+    // The bundled UI sits beside bin/ under dist/: dist/ui, written by npm run build (absent when run from src/).
+    uiDir: path.resolve(path.dirname(script), "..", "ui"),
   },
   stdin: process.stdin,
   stdout: (text) => process.stdout.write(text),

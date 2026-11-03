@@ -17,7 +17,7 @@ From a clone:
 
 ```sh
 npm install
-npm run build        # compiles src/ to dist/
+npm run build        # compiles src/ to dist/ and bundles the UI into dist/ui/
 npm test             # node:test against a fake command runner; no bd or claude needed
 npm run typecheck
 node dist/bin/kitchen.js --help
@@ -55,6 +55,8 @@ Registration is a human act: both commands run under the owner's bare actor and 
 ## `kitchen up` and `kitchen down`
 
 `kitchen up` installs this host's expeditor as a user service and starts it: a systemd user unit at `~/.config/systemd/user/kitchen-expeditor.service` on Linux, a launchd agent at `~/Library/LaunchAgents/ai.nomadec.kitchen.expeditor.plist` on macOS. The unit runs `kitchen up --foreground --interval <seconds>` (default 5), the long-lived process itself; `kitchen up --foreground --once` runs one tick in the terminal and waits for the turns it started, for a check by hand. `kitchen down` stops the service and removes the unit; the claims its turns hold are left as they are, so their leases go stale and a later tick reclaims them.
+
+The foreground process also serves the UI and runs `bd serve` beside the tick, both bound to loopback: the UI on `--port` (4817 by default, written into the unit) and `bd serve` on the next port, behind a token file the expeditor generates at each start (`~/.local/state/kitchen/serve.token`, mode 0600). The UI server passes every `/v0/...` request through to `bd serve` with the browser's bearer token, so the page and the API share one port and the UI never holds the SQL credential. `kitchen down` stops all three with the service. The first view is Pass: every open pass with its order, brief and an answer box; the word closes the gate under your name. `docs/ui.md` has the token, the ports and how to reach the page from a phone.
 
 Each tick is a sequence of named steps, in the order the spec lays them: `config`, `stations`, `gates`, `passes`, `sources`, `leases`, `reclaim`, `worktrees`, `ready`, `orders`, `caps`, `attended`, `dispatch`. What runs today: the stations whose owner and host match the config are read; the sources whose owner and host match are polled since the cursor on each bead, a `github` source for the issues of its repository updated since then (through `gh issue list`), a `file` source for the lines of a JSON Lines file after a line offset, and each new item becomes an order through intake with the source's recipe and class, the cursor advanced on the bead after each order (so an interruption between the two re-lists the item and the duplicate check, not a second order, answers it; `docs/intake.md`); the typed gates are evaluated (`gates`) and the word on closed Kitchen-laid passes applied (`passes`), both below; the turns whose children live are listed (`leases`); the stale leases in the space are reclaimed (`bd reclaim`) and, since reclaim clears the assignee, each reclaimed phase is assigned again to the station its `station:` label names, so it returns to the station it was laid for (a reclaimed order has no such label and stays released); the worktrees of closed orders under this host's checkouts are removed (see below); `bd ready` is listed per station assignee; a phase whose order is taken by a turn (a `loop` epic in progress and assigned to a station, on any host) is dropped; a station at its `cap:` is dropped; a phase on an attended station is labelled `waiting` and listed with the `kitchen turn <phase>` command that starts it; every remaining phase on an unattended station is started: the order is taken (`bd update <order> --claim` under the station actor, the per-order limit held in the space), its worktrees are created or reused, the phase is claimed the same way, and the runner is spawned. At the turn's end the last line of the session's output is commented on the phase bead and the order is released.
 
@@ -141,7 +143,7 @@ Each line names a Kitchen primitive and the beads feature under it. The glossary
 | Ready work | `bd ready` | yes |
 | Claim | `bd update --claim`, atomic in the SQL server | yes |
 | Lease | `bd heartbeat` while the session lives, `bd reclaim` when it dies | yes |
-| Pass | A gate bead of type `human` | yes |
+| Pass | A gate bead of type `human`; the UI closes it through `bd serve` with the word as the reason | yes |
 | External wait | Gate beads of type `timer`, `gh:pr`, `gh:run`, `bead`, evaluated by `bd gate check` | yes |
 | Dependency | `bd dep`, blocking edges between laid phases | yes |
 | Actor | `--actor` on every write, in the audit trail; the rules are cooperative, see `docs/trust-model.md` | yes |

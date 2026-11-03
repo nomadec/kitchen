@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { main } from "../cli.ts";
 import type { CliDeps } from "../cli.ts";
-import { fakeClock, fakeRunner } from "../testing/index.ts";
+import { fakeClock, fakeRunner, TEST_PROGRAM } from "../testing/index.ts";
 import type { ScriptedAnswer } from "../testing/index.ts";
 
 function kitchen(t: { after(fn: () => void): void }, table: readonly ScriptedAnswer[]) {
@@ -20,7 +20,7 @@ function kitchen(t: { after(fn: () => void): void }, table: readonly ScriptedAns
     clock: fakeClock(),
     env: { HOME: home, XDG_CONFIG_HOME: path.join(home, ".config") },
     hostname: "sona-laptop",
-    program: { platform: "linux", argv: ["/usr/bin/node", "/opt/kitchen/dist/bin/kitchen.js"], pluginDir: "/opt/kitchen/plugin" },
+    program: { platform: "linux", ...TEST_PROGRAM },
     stdout: (text) => out.push(text),
     stderr: (text) => err.push(text),
   };

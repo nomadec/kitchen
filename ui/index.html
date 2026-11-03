@@ -7,8 +7,11 @@
   <style>
     :root { color-scheme: light dark; font: 16px/1.4 system-ui, sans-serif; }
     body { margin: 0; padding: 1rem; max-width: 40rem; margin-inline: auto; }
-    header { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; }
+    header { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; flex-wrap: wrap; }
     h1 { font-size: 1.25rem; margin: 0; }
+    nav { display: flex; gap: .75rem; }
+    nav a { text-decoration: none; opacity: .7; }
+    nav a[aria-current=page] { opacity: 1; font-weight: 600; text-decoration: underline; }
     #me { opacity: .7; font-size: .9rem; }
     .notice { padding: .75rem; border-radius: .5rem; background: color-mix(in srgb, Canvas 85%, CanvasText); margin: 1rem 0; }
     .notice.error { background: color-mix(in srgb, Canvas 80%, red); }
@@ -22,11 +25,23 @@
     button { font: inherit; padding: .5rem .9rem; border-radius: .4rem; border: 0; background: color-mix(in srgb, CanvasText 85%, Canvas); color: Canvas; }
     button:disabled { opacity: .5; }
     .empty { opacity: .7; }
+    table { border-collapse: collapse; width: 100%; font-size: .95rem; margin: .5rem 0 1rem; }
+    th, td { text-align: left; vertical-align: top; padding: .35rem .5rem; border-bottom: 1px solid color-mix(in srgb, CanvasText 15%, transparent); }
+    th { font-weight: 600; opacity: .8; }
+    section.group h2 { font-size: 1.05rem; margin: 1rem 0 0; }
+    article.station { border: 1px solid color-mix(in srgb, CanvasText 25%, transparent); border-radius: .5rem; padding: .75rem 1rem; margin: 1rem 0; }
+    article.station h2 { font-size: 1.05rem; margin: 0 0 .25rem; }
+    article.station h3 { font-size: .9rem; margin: .75rem 0 .25rem; opacity: .8; }
+    article.station .facts { opacity: .7; font-size: .9rem; margin: 0 0 .5rem; }
+    article.station .offers { margin: 0; white-space: pre-wrap; }
+    article.station ul { margin: 0; padding-left: 1.2rem; }
+    code { font-size: .9rem; padding: .1rem .3rem; border-radius: .3rem; background: color-mix(in srgb, Canvas 85%, CanvasText); }
   </style>
 </head>
 <body>
   <header>
     <h1>Pass</h1>
+    <nav></nav>
     <span id="me"></span>
   </header>
   <main id="app"></main>

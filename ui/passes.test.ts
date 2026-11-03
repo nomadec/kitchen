@@ -2,36 +2,9 @@
 // and brief, the close posted with the word under the human actor, and the refusals before any request.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { passView, PassViewError } from "./passes.ts";
-
-interface Exchange {
-  method: string;
-  url: string;
-  status: number;
-  body: string;
-}
-
-interface Request {
-  method: string;
-  url: string;
-  headers: Record<string, string>;
-  body: string | undefined;
-}
-
-/** A fetch scripted from a table of exchanges, recording every request it answers. */
-function scriptedFetch(table: readonly Exchange[]): { fetch: typeof globalThis.fetch; requests: Request[] } {
-  const requests: Request[] = [];
-  const scripted: typeof globalThis.fetch = async (input, init) => {
-    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-    const method = init?.method ?? "GET";
-    const headers = Object.fromEntries(new Headers(init?.headers).entries());
-    requests.push({ method, url, headers, body: typeof init?.body === "string" ? init.body : undefined });
-    const row = table.find((r) => r.method === method && r.url === url);
-    if (!row) throw new Error(`Unexpected request: ${method} ${url}`);
-    return new Response(row.body, { status: row.status, headers: { "content-type": "application/json" } });
-  };
-  return { fetch: scripted, requests };
-}
+import { ViewError } from "./client.ts";
+import { passView } from "./passes.ts";
+import { scriptedFetch } from "./scripted-fetch.ts";
 
 const PASS = {
   id: "kitchen-33", title: "pass: approve the proposal", status: "open", issue_type: "gate", await_type: "human",
@@ -102,7 +75,7 @@ test("a station actor, and the expeditor, may not close a pass through the UI: r
     await assert.rejects(
       () => view.answer({ id: "kitchen-33" }, "ship"),
       (error: unknown) =>
-        error instanceof PassViewError &&
+        error instanceof ViewError &&
         error.message === `${actor} may not close the pass kitchen-33: a pass closes only under a person's name (a cooperative rule, not a security boundary: docs/trust-model.md)`,
     );
     assert.equal(api.requests.length, 0);
@@ -119,6 +92,6 @@ test("an empty word is refused before any request; a refused token and a bd serv
     { method: "POST", url: "/v0/beads/issues/kitchen-33:close", status: 409, body: '{"code":"conflict","detail":"kitchen-33 is already closed"}' },
   ]);
   const view = passView({ fetch: refused.fetch, token: "stale", actor: "sona" });
-  await assert.rejects(() => view.list(), (error: unknown) => error instanceof PassViewError && error.message === "the token was refused: missing or invalid bearer token" && error.status === 401);
-  await assert.rejects(() => view.answer({ id: "kitchen-33" }, "ship"), (error: unknown) => error instanceof PassViewError && error.message === "bd serve refused the close of kitchen-33: kitchen-33 is already closed" && error.status === 409);
+  await assert.rejects(() => view.list(), (error: unknown) => error instanceof ViewError && error.message === "the token was refused: missing or invalid bearer token" && error.status === 401);
+  await assert.rejects(() => view.answer({ id: "kitchen-33" }, "ship"), (error: unknown) => error instanceof ViewError && error.message === "bd serve refused the close of kitchen-33: kitchen-33 is already closed" && error.status === 409);
 });

@@ -1,13 +1,9 @@
 // The station: a prepared place (ADR 0005) registered as a bead of type `station`. A template, from a
-// plugin or a file, gives the shape; the values only the host knows complete it. Both directions live
-// here: the bead a template and values become, and the station read back from a bead.
-import fs from "node:fs";
-import path from "node:path";
+// plugin or a file (station-template.ts reads it), gives the shape; the values only the host knows
+// complete it. Both directions live here: the bead a template and values become, and the station read
+// back from a bead. Nothing of Node here: the browser's Stations view reads stations through this too.
 import { labelValue, noteLine } from "./fields.ts";
 import type { Bead, CreateFields } from "./space.ts";
-
-/** The file a plugin directory holds its station template in. */
-export const TEMPLATE_FILE = "station.json";
 
 /** The shape a template gives: everything in the launch spec that is not about one host. */
 export interface StationTemplate {
@@ -107,27 +103,6 @@ export class StationError extends Error {
 
 const TIMEOUT = /^\d+(s|m|h)$/;
 
-/** Reads a template from a file, or from a plugin directory holding `station.json`. */
-export function loadTemplate(target: string): StationTemplate {
-  const file = fs.existsSync(target) && fs.statSync(target).isDirectory() ? path.join(target, TEMPLATE_FILE) : target;
-  if (!fs.existsSync(file)) throw new StationError(`no station template at ${file}`);
-  const fields = shape(parseJson(fs.readFileSync(file, "utf8"), file), file);
-  const template: StationTemplate = {
-    offers: fields.text("offers"),
-    provider: fields.text("provider"),
-    models: fields.list("models"),
-    auth: fields.text("auth"),
-    plugins: fields.list("plugins"),
-    skills: fields.list("skills"),
-    repositories: fields.list("repositories"),
-    worktrees: fields.text("worktrees"),
-    budget: fields.budget(),
-  };
-  const name = fields.raw.name;
-  if (typeof name === "string" && name !== "") template.name = name;
-  return template;
-}
-
 /** The `bd create` fields of the station bead a template and the host's values make. */
 export function stationFields(template: StationTemplate, values: StationValues): CreateFields {
   const name = values.name ?? template.name;
@@ -225,7 +200,8 @@ function isRepository(value: unknown): value is { slug: string; path: string } {
   return typeof r === "object" && r !== null && typeof r.slug === "string" && typeof r.path === "string";
 }
 
-function parseJson(text: string, where: string): unknown {
+/** JSON, or a StationError naming where it was read from; station-template.ts reads the template file through this. */
+export function parseJson(text: string, where: string): unknown {
   try {
     return JSON.parse(text);
   } catch (error) {
@@ -233,8 +209,8 @@ function parseJson(text: string, where: string): unknown {
   }
 }
 
-/** The typed readers of one JSON object's fields; each names the field it lacks. */
-function shape(value: unknown, where: string) {
+/** The typed readers of one JSON object's fields; each names the field it lacks. Shared with station-template.ts, the one reader that touches a file. */
+export function shape(value: unknown, where: string) {
   if (typeof value !== "object" || value === null || Array.isArray(value)) throw new StationError(`${where} must hold a JSON object`);
   const raw = value as Record<string, unknown>;
   const lacks = (what: string) => new StationError(`${where} lacks ${what}`);

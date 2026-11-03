@@ -1,6 +1,6 @@
 # The UI: served by your expeditor, talking to `bd serve` with a token
 
-The UI is a static single-page app your own host's expeditor serves (story 69, ADR 0003). It reads and writes the space through `bd serve`, the beads HTTP API, with a bearer token; it never holds the SQL credential. The first view is **Pass**: every open pass with its order, its brief and an answer box, so a decision is one short exchange from a phone.
+The UI is a static single-page app your own host's expeditor serves (story 69, ADR 0003). It reads and writes the space through `bd serve`, the beads HTTP API, with a bearer token; it never holds the SQL credential. It has four views, each a link a phone can bookmark: **Pass** (`#pass`, the page's default), every open pass with its order, its brief and an answer box, so a decision is one short exchange; **Orders** (`#orders`), where everything stands; **Stations** (`#stations`), what your agents are doing and what waits on you; **Activity** (`#activity`), what changed while you were away. Only Pass writes.
 
 ## What `kitchen up` starts
 
@@ -42,7 +42,25 @@ POST /v0/beads/issues/<pass>:close   {"actor": "<owner>", "reason": "<word>"}
 
 so the word is the pass's close reason, as `kitchen pass` writes it, and the phase laid behind the pass becomes ready for the next tick. The actor is the owner from `/me`: the bare human name. The view refuses, before any request, to close under a station or expeditor actor (`sona/oven`, `sona/expeditor`), the same cooperative rule the `bd` wrapper and the CLI apply (`docs/trust-model.md`); the rule is cooperative, and nothing in bd serve stops a caller who names the owner as the actor themselves.
 
-The UI is tested at two seams: the data layer against a scripted `fetch` (`ui/passes.test.ts`) and the server at its HTTP port against a stand-in for `bd serve` (`src/expeditor/ui.test.ts`). The page itself is exercised by the hand-run smoke.
+## The Orders view
+
+Every open order and the twenty closed last (`GET /v0/beads/issues?type=epic&label=loop`, then `...&status=closed&limit=20`), grouped by status in the order in progress, open, blocked, deferred, closed, with its class, the recipe and the `rev:<revision>` it pinned (the first pin of its `recipe:` note: the recipe it walks now), and where it is: the phases among its open children (`GET /v0/beads/issues?parent=<order>`), each as `<slug> (<state> at <station>)` where the state is `in progress` for a phase a turn is working, `waiting` for one the expeditor labelled `waiting` at an attended station, and `laid` for one not started. An order with no open phase shows `none laid`, or `done` when closed. The id links to the order's source when it carries an external reference.
+
+## The Stations view
+
+Every registered station in the space, not only this host's (`GET /v0/beads/issues?type=station`), with its title, attended or not, owner, host, what it offers and the turns it runs against its cap (`GET /v0/beads/issues?assignee=<station>&status=in_progress`, the order a station holds left out of the count). An attended station also lists the phases waiting for its human (`GET /v0/beads/ready?assignee=<station>`, kept to those the expeditor labelled `waiting` on its last tick: not held by another turn, not over the cap), each with the exact command to run in a terminal on that host:
+
+```
+kitchen turn <phase>
+```
+
+There is no start button in v1 (spec: out of scope): the turn is attended, so it runs in your own terminal, where the runner is interactive. A station bead that does not parse stops the view with the field it lacks, the same message `kitchen status` prints.
+
+## The Activity view
+
+The latest fifty records of the events journal, newest first, each with when, who (the actor: you, a station or the expeditor), what (`create`, `update`, `close`, `dep_add`, as the journal names it), the bead with its title, and a detail: the close reason, the dependency added, or the bead's status and station. The journal route reads forward from a sequence number (`GET /v0/beads/events?since=<seq>&limit=<n>`), so the view asks for the head first and then for the fifty records behind it. A space whose journal is off (`bd config set events-journal true` on the server; `scripts/install-server.sh` sets it) shows bd serve's refusal instead.
+
+The UI is tested at two seams: each view's data layer against a scripted `fetch` (`ui/passes.test.ts`, `ui/orders.test.ts`, `ui/stations.test.ts`, `ui/activity.test.ts`, all through `ui/scripted-fetch.ts`) and the server at its HTTP port against a stand-in for `bd serve` (`src/expeditor/ui.test.ts`). The page itself, and the navigation between the views, is exercised by the hand-run smoke.
 
 ## Reaching it from a phone
 
@@ -55,4 +73,4 @@ In both cases the token is the second lock. Paste it on the phone the first time
 
 ## Building the UI
 
-`npm run build` compiles `src/` with `tsc` and bundles `ui/app.ts` and `ui/index.html` with esbuild into `dist/ui/`, which the installed package ships and the expeditor serves from beside its `dist/bin`. The browser code imports the actor rules from `src/actor.ts` and nothing else from `src/`; `npm run typecheck` checks it against the DOM types through `tsconfig.ui.json`. There is no framework; the page is drawn with the DOM API.
+`npm run build` compiles `src/` with `tsc` and bundles `ui/app.ts` and `ui/index.html` with esbuild into `dist/ui/`, which the installed package ships and the expeditor serves from beside its `dist/bin`. The browser code imports from `src/` only what reads a bead back (the actor rules, the order and its class, the station, the laid phase's labels, the pass's order naming, and the note and label fields), none of which touches Node; `npm run typecheck` checks it against the DOM types through `tsconfig.ui.json`, whose `include` lists those files. There is no framework; the page is drawn with the DOM API.

@@ -2,7 +2,8 @@
 import { parseArgs } from "node:util";
 import type { Command } from "../cli.ts";
 import { RefusedError } from "../space.ts";
-import { StationError, loadTemplate, stationFields } from "../station.ts";
+import { StationError, stationFields } from "../station.ts";
+import { loadTemplate } from "../station-template.ts";
 import type { StationValues } from "../station.ts";
 import { openRegistrationSpace } from "./host-space.ts";
 

@@ -43,8 +43,8 @@ test("a v1 command this release does not implement yet says so, issues nothing a
   const k = kitchen();
   assert.notEqual(await k.run("status"), 0);
   assert.match(k.err.join(""), /kitchen status is not implemented yet/);
-  assert.notEqual(await k.run("turn", "kitchen-1"), 0);
-  assert.match(k.err.join(""), /kitchen turn is not implemented yet/);
+  assert.notEqual(await k.run("pass"), 0);
+  assert.match(k.err.join(""), /kitchen pass is not implemented yet/);
   assert.deepEqual(k.runner.calls, []);
 });
 

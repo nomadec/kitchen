@@ -7,6 +7,7 @@ import { orderAdd } from "./commands/order-add.ts";
 import { recipeAdd } from "./commands/recipe-add.ts";
 import { sourceAdd } from "./commands/source-add.ts";
 import { stationAdd } from "./commands/station-add.ts";
+import { turn } from "./commands/turn.ts";
 import { up } from "./commands/up.ts";
 
 /** The kitchen program itself, as the expeditor's service unit and the runner need to name it. */
@@ -47,7 +48,7 @@ export const COMMANDS: readonly CommandEntry[] = [
   { name: "recipe add", summary: "Register a recipe from a plugin directory, a file or a URL", run: recipeAdd },
   { name: "station add", summary: "Register a station on this host from a template and values", run: stationAdd },
   { name: "source add", summary: "Register a polled source with its kind, target, recipe and class", run: sourceAdd },
-  { name: "turn", summary: "Run one waiting phase on an attended station in this terminal" },
+  { name: "turn", summary: "Run one waiting phase on an attended station in this terminal", run: turn },
   { name: "pass", summary: "List briefed passes and close one with your word" },
   { name: "status", summary: "Show the expeditor, running turns, waiting phases, open passes and caps" },
 ];

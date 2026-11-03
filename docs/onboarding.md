@@ -87,10 +87,10 @@ A host is a machine with one expeditor and the stations registered on it. Each h
 3. Register a station from a template, adding the values only this host knows:
 
    ```sh
-   kitchen station add <template> --name <name> --repo <slug>=<local path> --cap 1
+   kitchen station add <template> --repo <slug>=<local path> --cap 1 --timeout 45m
    ```
 
-   The template comes from a plugin or a file and gives the shape. You supply the owner (defaulted from `kitchen init`), the host (defaulted from the hostname), the local path of each repository, the cap, the wall-clock timeout, the names of any secrets and whether a human sits at this station. The result is a `station` bead titled `<owner>/<name>`. Registration is a human act: it runs under your bare actor and is refused under a station actor.
+   The template is a `station.json` file, from a plugin or on disk, and gives the shape. You supply the owner (defaulted from `kitchen init`), the host (defaulted from the host config), the local path of each repository the template offers, the cap, the wall-clock timeout, the names of any secrets (`--secret`) and whether a human sits at this station (`--attended`). The result is a `station` bead titled `<owner>/<name>`. Registration is a human act: it runs under your bare actor and is refused under a station actor. `docs/registration.md` shows an example template and the bead it becomes, and how to register a polled source with `kitchen source add`.
 
 4. Start the expeditor as a user service:
 

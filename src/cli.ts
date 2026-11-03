@@ -3,6 +3,8 @@ import type { Clock } from "./clock.ts";
 import type { CommandRunner } from "./runner.ts";
 import { init } from "./commands/init.ts";
 import { recipeAdd } from "./commands/recipe-add.ts";
+import { sourceAdd } from "./commands/source-add.ts";
+import { stationAdd } from "./commands/station-add.ts";
 
 export interface CliDeps {
   runner: CommandRunner;
@@ -29,8 +31,8 @@ export const COMMANDS: readonly CommandEntry[] = [
   { name: "down", summary: "Stop this host's expeditor, leaving claimed phases reclaimable" },
   { name: "order add", summary: "Add an order from a source URL, a file or a sentence" },
   { name: "recipe add", summary: "Register a recipe from a plugin directory, a file or a URL", run: recipeAdd },
-  { name: "station add", summary: "Register a station on this host from a template and values" },
-  { name: "source add", summary: "Register a polled source with its kind, target, recipe and class" },
+  { name: "station add", summary: "Register a station on this host from a template and values", run: stationAdd },
+  { name: "source add", summary: "Register a polled source with its kind, target, recipe and class", run: sourceAdd },
   { name: "turn", summary: "Run one waiting phase on an attended station in this terminal" },
   { name: "pass", summary: "List briefed passes and close one with your word" },
   { name: "status", summary: "Show the expeditor, running turns, waiting phases, open passes and caps" },

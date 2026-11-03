@@ -6,6 +6,7 @@ import { actorName } from "./actor.ts";
 import type { Actor } from "./actor.ts";
 import { spaceDir } from "./config.ts";
 import type { HostConfig } from "./config.ts";
+import { noteLine, withNoteLine } from "./fields.ts";
 import type { CommandResult, CommandRunner } from "./runner.ts";
 
 /** A bead as bd prints it with --json; only the fields Kitchen reads are named. */
@@ -62,7 +63,8 @@ export interface UpdateFields {
   status?: string;
 }
 
-export interface ReadyFilter {
+/** What `bd ready` and `bd list` narrow by. */
+export interface BeadFilter {
   assignee?: string;
   /** Every label must be present. */
   labels?: readonly string[];
@@ -70,11 +72,9 @@ export interface ReadyFilter {
   parent?: string;
 }
 
-export interface ListFilter {
-  type?: string;
-  /** Every label must be present. */
-  labels?: readonly string[];
-}
+export type ReadyFilter = BeadFilter;
+/** The name the recipe slice gave the list filter; the same type. */
+export type ListFilter = BeadFilter;
 
 export interface GateFields {
   /** The bead the gate blocks: the phase laid behind a pass, or behind an external wait. */
@@ -121,8 +121,8 @@ export interface Space {
   addDependency(id: string, blockedBy: string): Promise<void>;
   /** Open beads with no active blocker, as `bd ready` lists them. */
   ready(filter?: ReadyFilter): Promise<Bead[]>;
-  /** Open beads of a type, with their text, as `bd list` prints them. */
-  list(filter?: ListFilter): Promise<Bead[]>;
+  /** Open beads matching the filter, as `bd list` prints them. */
+  list(filter?: BeadFilter): Promise<Bead[]>;
   show(id: string): Promise<Bead>;
   /** The value of the `<key>: <value>` line of the bead's notes, if there is one. */
   readNote(id: string, key: string): Promise<string | undefined>;
@@ -237,6 +237,8 @@ export function openSpace(deps: SpaceDeps): Space {
         "list",
         ...flag("--type", filter.type),
         ...each("--label", filter.labels),
+        ...flag("--assignee", filter.assignee),
+        ...flag("--parent", filter.parent),
         "--limit", "0",
       ]),
 
@@ -280,24 +282,6 @@ export function openSpace(deps: SpaceDeps): Space {
         .map((line) => JSON.parse(line) as JournalEvent);
     },
   };
-}
-
-// Notes are lines of `<key>: <value>`.
-const isNoteLine = (key: string) => (line: string) => line.startsWith(`${key}:`);
-
-function noteLine(notes: string, key: string): string | undefined {
-  const line = notes.split("\n").find(isNoteLine(key));
-  return line?.slice(key.length + 1).trim();
-}
-
-/** Replaces the key's line of the notes or appends one. */
-function withNoteLine(notes: string, key: string, value: string): string {
-  const line = `${key}: ${value}`;
-  const lines = notes === "" ? [] : notes.split("\n");
-  const at = lines.findIndex(isNoteLine(key));
-  if (at === -1) lines.push(line);
-  else lines[at] = line;
-  return lines.join("\n");
 }
 
 function flag(name: string, value: string | undefined): string[] {

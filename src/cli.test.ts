@@ -32,6 +32,7 @@ function kitchen() {
     clock: fakeClock(),
     env: {},
     hostname: "oven",
+    program: { platform: "linux", argv: ["/usr/bin/node", "/opt/kitchen/dist/bin/kitchen.js"], pluginDir: "/opt/kitchen/plugin" },
     stdout: () => {},
     stderr: (text) => err.push(text),
   };

@@ -33,7 +33,15 @@ export interface HostOptions {
   /** Entries laid over the environment, such as the `BEADS_ACTOR` a session Kitchen started carries. */
   sessionEnv?: Record<string, string>;
   config?: HostConfig;
+  /** The platform `kitchen up` writes a service unit for; `linux` unless a test says `darwin`. */
+  platform?: string;
 }
+
+/** Where the test host's kitchen program lives: the service unit and the runner name these. */
+export const TEST_PROGRAM = {
+  argv: ["/usr/bin/node", "/opt/kitchen/dist/bin/kitchen.js"],
+  pluginDir: "/opt/kitchen/plugin",
+} as const;
 
 /** A host with its config written, removed when the test ends. */
 export function initialisedHost(t: { after(fn: () => void): void }, table: readonly ScriptedAnswer[], options: HostOptions = {}): InitialisedHost {
@@ -50,8 +58,9 @@ export function initialisedHost(t: { after(fn: () => void): void }, table: reado
   const deps: CliDeps = {
     runner,
     clock: fakeClock(),
-    env: { HOME: home, XDG_CONFIG_HOME: path.join(home, ".config"), ...options.sessionEnv },
+    env: { HOME: home, XDG_CONFIG_HOME: path.join(home, ".config"), PATH: "/usr/local/bin:/usr/bin", ...options.sessionEnv },
     hostname: config.host,
+    program: { platform: options.platform ?? "linux", ...TEST_PROGRAM },
     stdout: (text) => out.push(text),
     stderr: (text) => err.push(text),
   };

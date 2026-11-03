@@ -28,7 +28,11 @@ function kitchen(t: Scope, table: readonly ScriptedAnswer[], sessionEnv: Record<
   const out: string[] = [];
   const err: string[] = [];
   const runner = fakeRunner(table);
-  const deps: CliDeps = { runner, clock: fakeClock(), env, hostname: "sona-laptop", stdout: (s) => out.push(s), stderr: (s) => err.push(s) };
+  const deps: CliDeps = {
+    runner, clock: fakeClock(), env, hostname: "sona-laptop",
+    program: { platform: "linux", argv: ["/usr/bin/node", "/opt/kitchen/dist/bin/kitchen.js"], pluginDir: "/opt/kitchen/plugin" },
+    stdout: (s) => out.push(s), stderr: (s) => err.push(s),
+  };
   return { home, run: (...argv: string[]) => main(argv, deps), runner, out, err };
 }
 

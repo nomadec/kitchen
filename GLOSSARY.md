@@ -28,6 +28,10 @@ The phase whose `entry` lists the class an order enters with. Intake lays it fir
 
 One phase of one order, worked in one fresh session, ending in a result line.
 
+## Take
+
+The claim a turn holds on its order for as long as it runs, under the station actor, so that one order has at most one turn at a time on any host. The expeditor takes the order before it claims the phase and releases the take when the turn ends. A phase whose order is taken waits for the next tick; a phase on an attended station is labelled `waiting` instead and starts on the human's word.
+
 ## Pass
 
 A point where a human decides before the order continues. A pass holds a brief and closes with the human's word. It is laid only when a human is needed. Umka called this a checkpoint.

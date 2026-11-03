@@ -144,6 +144,16 @@ export interface Space {
   checkGates(type?: GateType): Promise<void>;
   /** The events journal after a sequence number. */
   events(since: number): Promise<JournalEvent[]>;
+  /**
+   * Claims the bead atomically under this actor, as `bd update --claim` does: the take on an order and
+   * the claim on a phase, both of which beads requires from the holder (story 60). Idempotent when this
+   * actor holds it already; a SpaceError naming the holder when another does. Answers the bead as claimed.
+   */
+  claim(bead: BeadRef): Promise<Bead>;
+  /** Releases a claim this actor holds: the bead is open and unassigned again. */
+  release(bead: BeadRef): Promise<void>;
+  /** Appends a comment to a bead: a turn's result line on its phase. */
+  comment(id: string, text: string): Promise<void>;
 }
 
 /** The pointer every refusal ends with. */
@@ -292,6 +302,24 @@ export function openSpace(deps: SpaceDeps): Space {
         .split("\n")
         .filter((line) => line.trim() !== "")
         .map((line) => JSON.parse(line) as JournalEvent);
+    },
+
+    claim: async (bead) => {
+      refuseRegistered("edit", bead.issue_type);
+      // bd update --json answers an array holding the bead as it is now.
+      const [claimed] = await bdJson<Bead[]>(["update", bead.id, "--claim"]);
+      if (!claimed) throw new Error(`bd update ${bead.id} --claim answered with no bead`);
+      return claimed;
+    },
+
+    release: async (bead) => {
+      refuseRegistered("edit", bead.issue_type);
+      // An empty assignee is the one flag value flag() would drop, so the argv is spelled out.
+      await bdJson<unknown>(["update", bead.id, "--status", "open", "--assignee", ""]);
+    },
+
+    comment: async (id, text) => {
+      await bdJson<unknown>(["comments", "add", id, text]);
     },
   };
 }

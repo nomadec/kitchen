@@ -20,6 +20,7 @@ function kitchen(t: { after(fn: () => void): void }, table: readonly ScriptedAns
     clock: fakeClock(),
     env: { HOME: home, XDG_CONFIG_HOME: path.join(home, ".config") },
     hostname: "sona-laptop",
+    program: { platform: "linux", argv: ["/usr/bin/node", "/opt/kitchen/dist/bin/kitchen.js"], pluginDir: "/opt/kitchen/plugin" },
     stdout: (text) => out.push(text),
     stderr: (text) => err.push(text),
   };

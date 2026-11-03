@@ -1,11 +1,23 @@
 // The kitchen command: ten v1 subcommands, dispatched by name. Everything external comes in through deps.
 import type { Clock } from "./clock.ts";
 import type { CommandRunner } from "./runner.ts";
+import { down } from "./commands/down.ts";
 import { init } from "./commands/init.ts";
 import { orderAdd } from "./commands/order-add.ts";
 import { recipeAdd } from "./commands/recipe-add.ts";
 import { sourceAdd } from "./commands/source-add.ts";
 import { stationAdd } from "./commands/station-add.ts";
+import { up } from "./commands/up.ts";
+
+/** The kitchen program itself, as the expeditor's service unit and the runner need to name it. */
+export interface Program {
+  /** `linux` or `darwin`: which service manager `kitchen up` writes for. */
+  platform: string;
+  /** The argv that starts kitchen: node and the bin script. */
+  argv: readonly string[];
+  /** The Kitchen plugin directory the runner loads into every session: the turn driver and the Stop hook. */
+  pluginDir: string;
+}
 
 export interface CliDeps {
   runner: CommandRunner;
@@ -13,6 +25,7 @@ export interface CliDeps {
   env: Record<string, string | undefined>;
   /** The name of this host, written into the host config by `kitchen init`. */
   hostname: string;
+  program: Program;
   stdout: (text: string) => void;
   stderr: (text: string) => void;
 }
@@ -28,8 +41,8 @@ interface CommandEntry {
 /** The v1 commands, in the order `kitchen --help` lists them. Nothing else. */
 export const COMMANDS: readonly CommandEntry[] = [
   { name: "init", summary: "Write this host's config and verify the connection to the space", run: init },
-  { name: "up", summary: "Start this host's expeditor as a user service" },
-  { name: "down", summary: "Stop this host's expeditor, leaving claimed phases reclaimable" },
+  { name: "up", summary: "Start this host's expeditor as a user service", run: up },
+  { name: "down", summary: "Stop this host's expeditor, leaving claimed phases reclaimable", run: down },
   { name: "order add", summary: "Add an order from a source URL, a file or a sentence", run: orderAdd },
   { name: "recipe add", summary: "Register a recipe from a plugin directory, a file or a URL", run: recipeAdd },
   { name: "station add", summary: "Register a station on this host from a template and values", run: stationAdd },

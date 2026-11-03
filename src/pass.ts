@@ -14,8 +14,6 @@ export interface Pass {
   order?: string;
   /** The brief: the reason the gate was laid with. A pass without one is open but not briefed. */
   brief?: string;
-  /** The person it is for. */
-  assignee?: string;
   labels: string[];
   /** The bead as read, for the close. */
   ref: BeadRef;
@@ -51,8 +49,12 @@ export function parsePass(bead: Bead): Pass {
   if (typeof bead.parent === "string" && bead.parent !== "") pass.order = bead.parent;
   const brief = briefOf(bead.description);
   if (brief !== undefined) pass.brief = brief;
-  if (typeof bead.assignee === "string" && bead.assignee !== "") pass.assignee = bead.assignee;
   return pass;
+}
+
+/** The brief, one line per line and each indented, as the Pass view and status print it; a note when there is none. */
+export function briefLines(pass: Pass, indent: string): string[] {
+  return (pass.brief ?? "(no brief yet)").split("\n").map((line) => `${indent}${line}`);
 }
 
 /** The open passes: the open gates of type human, as bd lists them. */

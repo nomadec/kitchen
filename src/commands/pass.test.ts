@@ -48,7 +48,7 @@ test("kitchen pass <id> <word> closes that pass with the word as its reason unde
     assert.deepEqual({ cwd: call.cwd, env: call.env }, k.connection);
     assert.equal(call.argv[1], "--actor");
   }
-  assert.match(k.out.join(""), /Closed kitchen-32 \(decide: spec\) on order kitchen-30 \(Cookie jar\) with: ship it\nThe phase behind it is ready for the next tick\.\n$/);
+  assert.match(k.out.join(""), /Closed kitchen-32 \(decide: spec\) on order kitchen-30 \(Cookie jar\) with: ship it\nThe phase behind it is unblocked: the expeditor starts it on its next tick, or kitchen turn does when its station is attended\.\n$/);
 });
 
 test("kitchen pass with no arguments lists every open briefed pass numbered, each with its order and brief, asks which and for the word, and closes the chosen one", async (t) => {
@@ -60,7 +60,7 @@ test("kitchen pass with no arguments lists every open briefed pass numbered, eac
   assert.equal(
     k.out.join(""),
     [
-      "2 open passes for sona:",
+      "2 open passes:",
       "",
       "1. kitchen-22  decide: grill",
       "   order kitchen-20 (Stale cookie)",
@@ -72,7 +72,7 @@ test("kitchen pass with no arguments lists every open briefed pass numbered, eac
       "   The spec is drafted at docs/spec.md. Ship it, or name what is missing.",
       "",
       "Pass (number or id, empty to leave them open): Your word: Closed kitchen-32 (decide: spec) on order kitchen-30 (Cookie jar) with: ship it",
-      "The phase behind it is ready for the next tick.",
+      "The phase behind it is unblocked: the expeditor starts it on its next tick, or kitchen turn does when its station is attended.",
       "",
     ].join("\n"),
   );
@@ -92,16 +92,25 @@ test("a pass chosen by id at the question, an empty answer, and a terminal with 
   const piped = kitchen(t, TWO_PASSES);
   assert.equal(await piped.run(), 0, piped.err.join(""));
   assert.deepEqual(piped.closes(), []);
-  assert.match(piped.out.join(""), /^2 open passes for sona:\n/);
+  assert.match(piped.out.join(""), /^2 open passes:\n/);
   assert.doesNotMatch(piped.out.join(""), /Pass \(number or id/, "nothing is asked of a terminal with no input");
 });
 
-test("a session running as a station or as the expeditor is refused before any call: a pass closes only under a person's name", async (t) => {
+test("a session running as a station or as the expeditor can list the passes, but its close is refused by the space wrapper before any bd close: a pass closes only under a person's name", async (t) => {
   for (const actor of ["sona/desk", "sona/expeditor"]) {
-    const k = kitchen(t, [...TWO_PASSES, closed("kitchen-32")], { sessionEnv: { BEADS_ACTOR: actor } });
+    const session = ["--actor", actor];
+    const k = kitchen(t, [
+      { ...gates(GRILL_PASS, SPEC_PASS), args: [...session, "list", "--type", "gate", "--status", "open"] },
+      { ...orders(order("kitchen-20", "Stale cookie"), order("kitchen-30", "Cookie jar")), args: [...session, "list", "--type", "epic", "--label", "loop"] },
+      { ...closed("kitchen-32"), args: [...session, "close", "kitchen-32"] },
+    ], { sessionEnv: { BEADS_ACTOR: actor } });
     assert.equal(await k.run("kitchen-32", "ship it"), 1);
-    assert.match(k.err.at(-1) ?? "", new RegExp(`^kitchen pass: ${actor} may not answer a pass: a pass closes only under a person's name \\(a cooperative rule, not a security boundary: docs/trust-model.md\\)\n$`));
-    assert.equal(k.runner.calls.length, 0);
+    assert.match(k.err.at(-1) ?? "", new RegExp(`^kitchen pass: ${actor} may not close the pass kitchen-32: a pass closes only under a person's name \\(a cooperative rule, not a security boundary: docs/trust-model.md\\)\n$`));
+    assert.deepEqual(k.bd().map((argv) => argv[2]), ["list", "list"], "the reads were issued under the session's actor; no close was");
+
+    const listed = kitchen(t, [{ ...gates(GRILL_PASS), args: [...session, "list", "--type", "gate", "--status", "open"] }, { ...orders(), args: [...session, "list", "--type", "epic", "--label", "loop"] }], { sessionEnv: { BEADS_ACTOR: actor } });
+    assert.equal(await listed.run(), 0, listed.err.join(""));
+    assert.match(listed.out.join(""), /^1 open pass:\n\n1\. kitchen-22  decide: grill\n/);
   }
 });
 
@@ -111,7 +120,7 @@ test("a pass without a brief is listed as not yet briefed and can still be answe
   const k = kitchen(t, [gates(GRILL_PASS, bare, timer), orders(order("kitchen-20", "Stale cookie")), closed("kitchen-42")], { typed: "retry\n" });
 
   assert.equal(await k.run(), 1);
-  assert.equal(k.out[0], "1 open pass for sona:\n\n1. kitchen-22  decide: grill\n   order kitchen-20 (Stale cookie)\n   The grill found two shapes for the cookie jar.\n   Pick wide or tall.\n\nNot yet briefed: kitchen-42 (turn failed: reproduce)\n");
+  assert.equal(k.out[0], "1 open pass:\n\n1. kitchen-22  decide: grill\n   order kitchen-20 (Stale cookie)\n   The grill found two shapes for the cookie jar.\n   Pick wide or tall.\n\nNot yet briefed: kitchen-42 (turn failed: reproduce)\n");
   assert.deepEqual(k.closes(), [], "retry was read as the pass choice, which no pass matches");
   assert.match(k.err.at(-1) ?? "", /kitchen pass: retry is not an open pass/);
 
@@ -122,7 +131,7 @@ test("a pass without a brief is listed as not yet briefed and can still be answe
 
   const empty = kitchen(t, [gates(), orders()], { typed: "1\n" });
   assert.equal(await empty.run(), 0, empty.err.join(""));
-  assert.equal(empty.out.join(""), "No open briefed pass for sona.\n");
+  assert.equal(empty.out.join(""), "No open briefed pass.\n");
 });
 
 test("an id that is not an open pass, a missing word, a close bd refuses and a host without kitchen init are each refused naming the gap", async (t) => {

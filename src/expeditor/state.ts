@@ -38,7 +38,7 @@ export function readState(file: string): ExpeditorState | undefined {
 /** Writes the file whole, through a temporary name, so a reader never sees half a tick. */
 export function writeState(file: string, state: ExpeditorState): void {
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  const temp = `${file}.${process.pid}.tmp`;
+  const temp = `${file}.${state.pid}.tmp`;
   fs.writeFileSync(temp, `${JSON.stringify(state, null, 2)}\n`);
   fs.renameSync(temp, file);
 }

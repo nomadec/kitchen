@@ -124,4 +124,10 @@ test("kitchen up --foreground keeps the expeditor's state file current: written 
   const stopped = state();
   assert.equal(typeof stopped.stopped, "string", "the stop is recorded");
   assert.ok((stopped.tick as number) >= tick);
+
+  // One tick by hand leaves the same file, stopped after its tick: status reads it as not running.
+  const once = kitchen(t, QUIET_TICK);
+  assert.equal(await once.run("up", "--foreground", "--once"), 0, once.err.join(""));
+  const afterOnce = JSON.parse(fs.readFileSync(path.join(once.home, ".local", "state", "kitchen", "expeditor.json"), "utf8")) as Record<string, unknown>;
+  assert.deepEqual({ tick: afterOnce.tick, stopped: afterOnce.stopped }, { tick: 1, stopped: "2026-01-01T00:00:00.000Z" });
 });

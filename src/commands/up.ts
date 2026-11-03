@@ -64,9 +64,13 @@ async function foreground(deps: CliDeps, interval: number, once: boolean): Promi
     clock: deps.clock,
     turnRunner: claudeRunner({ runner: deps.runner, env: deps.env, config, pluginDir: deps.program.pluginDir }),
   });
+  // What kitchen status reads: the pid, the last tick and its instant, and the stop when it is clean.
+  const state = expeditorState(expeditorStateFile(deps.env), deps.clock, { pid: process.pid, owner: config.owner, host: config.host, interval });
   if (once) {
     const report = await run.tick();
+    state.ticked(report.tick);
     const ends = await run.settle();
+    state.stopped();
     deps.stdout(`Tick ${report.tick}: started ${report.started.length}, waiting ${report.waiting.length}, ended ${ends.length}\n`);
     return 0;
   }
@@ -79,8 +83,6 @@ async function foreground(deps: CliDeps, interval: number, once: boolean): Promi
   process.once("SIGTERM", stop);
   process.once("SIGINT", stop);
   log.write({ step: "start", interval, host: config.host, owner: config.owner });
-  // What kitchen status reads: the pid, the last tick and its instant, and the stop when it is clean.
-  const state = expeditorState(expeditorStateFile(deps.env), deps.clock, { pid: process.pid, owner: config.owner, host: config.host, interval });
   while (!stopping) {
     const report = await run.tick();
     state.ticked(report.tick);

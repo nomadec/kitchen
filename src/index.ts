@@ -36,9 +36,9 @@ export { claudeRunner, turnPrompt, KITCHEN_TURN_SKILL } from "./expeditor/claude
 export type { TurnRunner, TurnRequest, TurnHandle, TurnMode, ClaudeRunnerDeps } from "./expeditor/claude.ts";
 export { openLog } from "./expeditor/log.ts";
 export type { Log } from "./expeditor/log.ts";
-export { expeditorState, readState, writeState, isStale, STALE_AFTER_TICKS } from "./expeditor/state.ts";
+export { readState, isStale } from "./expeditor/state.ts";
 export type { ExpeditorState } from "./expeditor/state.ts";
-export { parsePass, briefOf, readPasses, readOrders, nameOrder, PassError } from "./pass.ts";
+export { parsePass, readPasses, readOrders, nameOrder } from "./pass.ts";
 export type { Pass } from "./pass.ts";
 export { serviceUnit, SERVICE_NAME } from "./expeditor/service.ts";
 export type { ServiceUnit, ServiceSpec } from "./expeditor/service.ts";

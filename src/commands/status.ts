@@ -8,7 +8,7 @@ import { expeditorStateFile } from "../config.ts";
 import { isStale, readState } from "../expeditor/state.ts";
 import type { ExpeditorState } from "../expeditor/state.ts";
 import type { Order } from "../order.ts";
-import { nameOrder, readOrders, readPasses } from "../pass.ts";
+import { briefLines, nameOrder, readOrders, readPasses } from "../pass.ts";
 import type { Pass } from "../pass.ts";
 import { readStations } from "../registered.ts";
 import { SpaceError } from "../space.ts";
@@ -24,7 +24,7 @@ stations with their orders, the phases waiting on attended stations with the kit
 that starts each, the open passes, and each station's cap against the turns it runs. Reads only.
 `;
 
-interface Picture {
+interface HostStatus {
   host: string;
   stateFile: string;
   state: ExpeditorState | undefined;
@@ -53,7 +53,7 @@ export const status: Command = async (args, deps) => {
   const { space, config } = opened;
 
   const stateFile = expeditorStateFile(deps.env);
-  const picture: Picture = {
+  const picture: HostStatus = {
     host: config.host, stateFile, state: readState(stateFile), now: deps.clock.now(),
     stations: [], orders: new Map(), running: new Map(), waiting: new Map(), passes: [],
   };
@@ -77,14 +77,11 @@ export const status: Command = async (args, deps) => {
   return 0;
 };
 
-function render(p: Picture): string {
+function render(p: HostStatus): string {
   const phaseLine = (bead: Bead, station: string) => `  ${bead.id}  ${bead.title}  order ${nameOrder(typeof bead.parent === "string" ? bead.parent : undefined, p.orders)}  at ${station}`;
   const turns = [...p.running].flatMap(([station, beads]) => beads.map((bead) => phaseLine(bead, station)));
   const waiting = [...p.waiting].flatMap(([station, beads]) => beads.flatMap((bead) => [phaseLine(bead, station), `    kitchen turn ${bead.id}`]));
-  const passes = p.passes.flatMap((pass) => [
-    `  ${pass.id}  ${pass.title}  order ${nameOrder(pass.order, p.orders)}`,
-    ...(pass.brief ?? "(no brief yet)").split("\n").map((line) => `    ${line}`),
-  ]);
+  const passes = p.passes.flatMap((pass) => [`  ${pass.id}  ${pass.title}  order ${nameOrder(pass.order, p.orders)}`, ...briefLines(pass, "    ")]);
   const width = Math.max(0, ...p.stations.map((s) => s.title.length));
   const stations = p.stations.map(
     (s) => `  ${s.title.padEnd(width)}  ${(s.attended ? "attended" : "unattended").padEnd(10)}  ${p.running.get(s.title)?.length ?? 0} of ${s.cap} running`,
@@ -101,7 +98,7 @@ function render(p: Picture): string {
 }
 
 /** Running, or not running with the reason: no file, a clean stop, or a file the next tick never refreshed. */
-function expeditorLine(p: Picture): string {
+function expeditorLine(p: HostStatus): string {
   const head = `Expeditor on ${p.host}:`;
   const s = p.state;
   if (!s) return `${head} not running (no state file at ${p.stateFile}: run kitchen up)`;

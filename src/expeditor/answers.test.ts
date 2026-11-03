@@ -11,7 +11,6 @@ import { initialisedHost } from "../testing/index.ts";
 import type { ScriptedAnswer } from "../testing/index.ts";
 
 const EXPEDITOR = ["--actor", "sona/expeditor"];
-const OVEN = ["--actor", "sona/oven"];
 
 /** Beneath every table: no stale lease to reclaim, and a phase read back after its turn is closed. */
 const SETTLED: ScriptedAnswer[] = [
@@ -63,10 +62,12 @@ const stations = (...rows: object[]): ScriptedAnswer => ({
 });
 const gatesChecked = (stdout: string): ScriptedAnswer => ({ command: "bd", args: [...EXPEDITOR, "gate", "check", "--json"], stdout });
 const NO_GATES = gatesChecked("No open gates found.\n");
+/** The owner's closed gates not yet applied, as the passes step lists them. */
 const closedPasses = (...rows: object[]): ScriptedAnswer => ({
-  command: "bd", args: [...EXPEDITOR, "list", "--type", "gate", "--status", "closed", "--exclude-label", "applied", "--limit", "0", "--json"], stdout: JSON.stringify(rows),
+  command: "bd", args: [...EXPEDITOR, "list", "--type", "gate", "--assignee", "sona", "--status", "closed", "--exclude-label", "applied", "--limit", "0", "--json"], stdout: JSON.stringify(rows),
 });
-const blocks = (gate: string, ...rows: object[]): ScriptedAnswer => ({
+/** The beads behind a gate: what it blocks. */
+const behind = (gate: string, ...rows: object[]): ScriptedAnswer => ({
   command: "bd", args: [...EXPEDITOR, "dep", "list", gate, "--direction", "up", "--type", "blocks", "--json"], stdout: JSON.stringify(rows),
 });
 const children = (order: string, ...rows: object[]): ScriptedAnswer => ({
@@ -113,7 +114,7 @@ test("each tick runs bd gate check before the passes; a gh:pr gate bd resolves (
 
   assert.deepEqual(k.bd().slice(1, 3), [
     [...EXPEDITOR, "gate", "check", "--json"],
-    [...EXPEDITOR, "list", "--type", "gate", "--status", "closed", "--exclude-label", "applied", "--limit", "0", "--json"],
+    [...EXPEDITOR, "list", "--type", "gate", "--assignee", "sona", "--status", "closed", "--exclude-label", "applied", "--limit", "0", "--json"],
   ], "the gates are checked right after the stations are read, then the closed passes listed");
   const gates = k.log().find((line) => line.step === "gates");
   assert.deepEqual({ checked: gates?.checked, resolved: gates?.resolved, escalated: gates?.escalated, errors: gates?.errors }, { checked: 1, resolved: ["kitchen-23"], escalated: 0, errors: 0 });
@@ -134,7 +135,7 @@ test("a closed turn failed pass with the word retry reopens the phase with its f
     stations(station("kitchen-10", "oven")),
     NO_GATES,
     closedPasses(pass("kitchen-22", "turn failed: reproduce", "retry")),
-    blocks("kitchen-22", phase("kitchen-21", "kitchen-20", "reproduce", "oven", { labels: ["failed:2"] })),
+    behind("kitchen-22", phase("kitchen-21", "kitchen-20", "reproduce", "oven", { labels: ["failed:2"] })),
     updated("kitchen-21"),
     updated("kitchen-22"),
     ready("oven", phase("kitchen-21", "kitchen-20", "reproduce", "oven")),
@@ -145,7 +146,7 @@ test("a closed turn failed pass with the word retry reopens the phase with its f
   assert.equal(await k.run(), 0, k.err.join(""));
 
   assert.deepEqual(k.bd().slice(2, 6), [
-    [...EXPEDITOR, "list", "--type", "gate", "--status", "closed", "--exclude-label", "applied", "--limit", "0", "--json"],
+    [...EXPEDITOR, "list", "--type", "gate", "--assignee", "sona", "--status", "closed", "--exclude-label", "applied", "--limit", "0", "--json"],
     [...EXPEDITOR, "dep", "list", "kitchen-22", "--direction", "up", "--type", "blocks", "--json"],
     [...EXPEDITOR, "update", "kitchen-21", "--remove-label", "failed:2", "--status", "open", "--json"],
     [...EXPEDITOR, "update", "kitchen-22", "--add-label", "applied", "--json"],
@@ -161,7 +162,7 @@ test("retry <station title> reassigns the phase: the assignee and the station: l
     stations(station("kitchen-10", "oven")),
     NO_GATES,
     closedPasses(pass("kitchen-22", "turn failed: reproduce", "retry sona/desk")),
-    blocks("kitchen-22", phase("kitchen-21", "kitchen-20", "reproduce", "oven", { labels: ["failed:2"] })),
+    behind("kitchen-22", phase("kitchen-21", "kitchen-20", "reproduce", "oven", { labels: ["failed:2"] })),
     updated("kitchen-21"),
     updated("kitchen-22"),
     ready("oven"),
@@ -185,7 +186,7 @@ test("the word stop closes the order's open phases and then the order with the w
     stations(station("kitchen-10", "oven")),
     NO_GATES,
     closedPasses(pass("kitchen-22", "turn failed: reproduce", "stop")),
-    blocks("kitchen-22", phase("kitchen-21", "kitchen-20", "reproduce", "oven", { labels: ["failed:2"] })),
+    behind("kitchen-22", phase("kitchen-21", "kitchen-20", "reproduce", "oven", { labels: ["failed:2"] })),
     children("kitchen-20", phase("kitchen-21", "kitchen-20", "reproduce", "oven", { labels: ["failed:2"] }), phase("kitchen-24", "kitchen-20", "review", "oven")),
     closed("kitchen-21"),
     closed("kitchen-24"),
@@ -214,7 +215,7 @@ test("any other word leaves the pass closed and the order open, with a note on t
     stations(station("kitchen-10", "oven")),
     NO_GATES,
     closedPasses(pass("kitchen-22", "rounds reached: review", "ship it as is")),
-    blocks("kitchen-22", phase("kitchen-21", "kitchen-20", "review", "oven")),
+    behind("kitchen-22", phase("kitchen-21", "kitchen-20", "review", "oven")),
     updated("kitchen-20"),
     updated("kitchen-22"),
     ready("oven"),
@@ -233,6 +234,53 @@ test("any other word leaves the pass closed and the order open, with a note on t
   assert.deepEqual({ word: applied?.word, applied: applied?.applied, order: applied?.order }, { word: "ship it as is", applied: "note", order: "kitchen-20" });
 });
 
+test("retry followed by anything but a station title (retry later) is some other word: the note, no reopen", async (t) => {
+  const k = kitchen(t, [
+    stations(station("kitchen-10", "oven")),
+    NO_GATES,
+    closedPasses(pass("kitchen-22", "turn failed: reproduce", "retry later")),
+    behind("kitchen-22", phase("kitchen-21", "kitchen-20", "reproduce", "oven", { labels: ["failed:2"] })),
+    updated("kitchen-20"),
+    updated("kitchen-22"),
+    ready("oven"),
+    held(),
+    running("oven"),
+    ...SETTLED,
+  ]);
+
+  assert.equal(await k.run(), 0, k.err.join(""));
+
+  assert.deepEqual(k.bd().filter((argv) => argv[2] === "update").map((argv) => argv.slice(2, 5)), [
+    ["update", "kitchen-20", "--append-notes"],
+    ["update", "kitchen-22", "--add-label"],
+  ]);
+  assert.equal(k.log().find((line) => line.step === "passes" && line.pass)?.applied, "note");
+});
+
+test("retry on a no station for pass, which blocks its order with no phase laid behind it, reopens nothing and notes on the order that the phase is laid by hand", async (t) => {
+  const k = kitchen(t, [
+    stations(station("kitchen-10", "oven")),
+    NO_GATES,
+    closedPasses(pass("kitchen-32", "no station for reproduce", "retry sona/oven", { parent: "kitchen-30" })),
+    behind("kitchen-32", { id: "kitchen-30", title: "Stale cookie", status: "open", issue_type: "epic", labels: ["loop"] }),
+    updated("kitchen-30"),
+    updated("kitchen-32"),
+    ready("oven"),
+    held(),
+    running("oven"),
+    ...SETTLED,
+  ]);
+
+  assert.equal(await k.run(), 0, k.err.join(""));
+
+  assert.deepEqual(k.bd().filter((argv) => argv[2] === "update"), [
+    [...EXPEDITOR, "update", "kitchen-30", "--append-notes", 'kitchen-32 (no station for reproduce) closed with "retry sona/oven", but no phase is laid behind the pass: the order stays open for sona to continue by hand', "--json"],
+    [...EXPEDITOR, "update", "kitchen-32", "--add-label", "applied", "--json"],
+  ]);
+  const applied = k.log().find((line) => line.step === "passes" && line.pass);
+  assert.deepEqual({ applied: applied?.applied, phases: applied?.phases, station: applied?.station }, { applied: "retry", phases: [], station: "sona/oven" });
+});
+
 test("a pass already labelled applied is skipped, as is a closed pass a recipe laid: the same tick run twice applies the word once", async (t) => {
   const k = kitchen(t, [
     stations(station("kitchen-10", "oven")),
@@ -242,7 +290,7 @@ test("a pass already labelled applied is skipped, as is a closed pass a recipe l
       pass("kitchen-32", "no station for reproduce", "retry", { parent: "kitchen-30", labels: ["applied"] }),
       pass("kitchen-42", "ship: Stale cookie", "yes", { parent: "kitchen-40" }),
     ),
-    blocks("kitchen-22", phase("kitchen-21", "kitchen-20", "reproduce", "oven", { labels: ["failed:2"] })),
+    behind("kitchen-22", phase("kitchen-21", "kitchen-20", "reproduce", "oven", { labels: ["failed:2"] })),
     updated("kitchen-21"),
     updated("kitchen-22"),
     ready("oven"),
@@ -273,7 +321,7 @@ test("retry on a phase whose station is attended leaves that phase waiting: no t
     stations(station("kitchen-10", "desk", { attended: true })),
     NO_GATES,
     closedPasses(pass("kitchen-22", "turn failed: grill", "retry")),
-    blocks("kitchen-22", phase("kitchen-21", "kitchen-20", "grill", "desk", { labels: ["failed:2"] })),
+    behind("kitchen-22", phase("kitchen-21", "kitchen-20", "grill", "desk", { labels: ["failed:2"] })),
     updated("kitchen-21"),
     updated("kitchen-22"),
     ready("desk", phase("kitchen-21", "kitchen-20", "grill", "desk")),
@@ -295,7 +343,7 @@ test("a pass whose word bd refuses to apply is logged and left unlabelled, so th
     stations(station("kitchen-10", "oven")),
     NO_GATES,
     closedPasses(pass("kitchen-22", "turn failed: reproduce", "retry")),
-    blocks("kitchen-22", phase("kitchen-21", "kitchen-20", "reproduce", "oven", { labels: ["failed:2"] })),
+    behind("kitchen-22", phase("kitchen-21", "kitchen-20", "reproduce", "oven", { labels: ["failed:2"] })),
     { command: "bd", args: [...EXPEDITOR, "update", "kitchen-21"], stderr: "Error: issue kitchen-21 is claimed by sona/oven\n", exitCode: 1 },
     ready("oven"),
     held(),

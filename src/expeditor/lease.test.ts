@@ -17,7 +17,7 @@ const OVEN = ["--actor", "sona/oven"];
 /** Beneath every table: no gate open and no closed pass to apply (answers.test.ts scripts those). */
 const QUIET: ScriptedAnswer[] = [
   { command: "bd", args: [...EXPEDITOR, "gate", "check", "--json"], stdout: "No open gates found.\n" },
-  { command: "bd", args: [...EXPEDITOR, "list", "--type", "gate", "--status", "closed"], stdout: "[]" },
+  { command: "bd", args: [...EXPEDITOR, "list", "--type", "gate"], stdout: "[]" },
 ];
 
 function kitchen(t: { after(fn: () => void): void }, table: ScriptedAnswer[]) {

@@ -127,10 +127,12 @@ export function expeditor(deps: ExpeditorDeps): Expeditor {
     },
 
     passes: async (state) => {
-      // Every closed gate not yet applied: bd keeps the labelled ones out, and the expeditor passes over
-      // a recipe's pass (its turn applies the word) and a typed gate (which carries no word).
+      // Every closed pass of the owner not yet applied: a pass is laid for the owner, so the assignee
+      // keeps the typed gates (unassigned) and other owners' passes out, and bd keeps the labelled ones
+      // out. The expeditor passes over a recipe's pass: its turn applies the word.
       const applied: string[] = [];
-      for (const gate of await state.space.list({ type: "gate", status: "closed", excludeLabels: [APPLIED] })) {
+      for (const gate of await state.space.list({ type: "gate", assignee: state.config.owner, status: "closed", excludeLabels: [APPLIED] })) {
+        // Checked again here, so a pass listed with the label anyway is never applied twice.
         if (gate.labels?.includes(APPLIED)) {
           log(state.report.tick, "passes", { pass: gate.id, skipped: "applied already" });
           continue;
@@ -144,7 +146,8 @@ export function expeditor(deps: ExpeditorDeps): Expeditor {
           applied.push(gate.id);
           log(state.report.tick, "passes", { ...done });
         } catch (error) {
-          // The pass stays unlabelled, so the next tick applies it again once what refused it is put right.
+          // A bd call that failed (a phase still held by a turn, an order with another open pass) leaves
+          // the pass unlabelled, so the next tick applies it again once what refused it is put right.
           if (!(error instanceof SpaceError)) throw error;
           log(state.report.tick, "passes", { pass: gate.id, failed: error.message });
         }

@@ -153,7 +153,7 @@ export interface Space {
   /** Evaluates the typed gates (all of them, or one type) and closes those that resolved; nothing when none is open. */
   checkGates(type?: GateType): Promise<GateCheck | undefined>;
   /** The beads this one blocks: the phase behind a gate. */
-  blocked(id: string): Promise<Bead[]>;
+  blocks(id: string): Promise<Bead[]>;
   /** The events journal after a sequence number. */
   events(since: number): Promise<JournalEvent[]>;
   /**
@@ -322,11 +322,12 @@ export function openSpace(deps: SpaceDeps): Space {
       const json = stdout.startsWith("{") ? stdout : stdout.slice(stdout.lastIndexOf("\n{") + 1);
       if (!json.startsWith("{")) return undefined;
       const counts = JSON.parse(json) as { checked: number; escalated: number; errors: number };
+      // The ids are only in the prose: bd 1.3.1 prints each as `✓ <id>: resolved - <why>`.
       const resolved = [...stdout.matchAll(/^\S+ (\S+): resolved\b/gmu)].map((match) => match[1] ?? "");
       return { checked: counts.checked, resolved, escalated: counts.escalated, errors: counts.errors };
     },
 
-    blocked: (id) => bdJson<Bead[]>(["dep", "list", id, "--direction", "up", "--type", "blocks"]),
+    blocks: (id) => bdJson<Bead[]>(["dep", "list", id, "--direction", "up", "--type", "blocks"]),
 
     events: async (since) => {
       const { stdout } = await bd(["events", "tail", "--since", String(since)]);

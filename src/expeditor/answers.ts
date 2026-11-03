@@ -5,10 +5,11 @@
 // moves it to that station as well, `stop` closes the order with the word, and any other word leaves
 // the pass closed and the order open with a note saying the human continues by hand. The pass is
 // labelled `applied` afterwards, so a restart or a repeated tick applies nothing twice.
+import { parseActor } from "../actor.ts";
 import { labelValue } from "../fields.ts";
 import { NO_STATION } from "../intake.ts";
 import { FAILED, failures } from "../laid.ts";
-import type { Bead, Space } from "../space.ts";
+import type { Bead, BeadRef, Space, UpdateFields } from "../space.ts";
 import { TURN_FAILED } from "./turn.ts";
 
 /** The label on a pass whose word has been applied, by the expeditor or by the turn behind it. */
@@ -31,11 +32,20 @@ export type Word =
   | { kind: "stop" }
   | { kind: "note"; word: string };
 
+/**
+ * Reads the word: `retry`, `retry <station title>` (the title must read as a station actor,
+ * `<owner>/<station>`; `retry later` is some other word), `stop`, or anything else, which is noted.
+ */
 export function parseWord(reason: string): Word {
   const word = reason.trim();
   const [first, ...rest] = word.split(/\s+/);
-  if (first?.toLowerCase() === "retry") return rest.length ? { kind: "retry", station: rest.join(" ") } : { kind: "retry" };
-  if (word.toLowerCase() === "stop") return { kind: "stop" };
+  if (first?.toLowerCase() === "retry") {
+    if (!rest.length) return { kind: "retry" };
+    const station = rest.join(" ");
+    if (rest.length === 1 && parseActor(station).kind === "station") return { kind: "retry", station };
+  } else if (word.toLowerCase() === "stop") {
+    return { kind: "stop" };
+  }
   return { kind: "note", word };
 }
 
@@ -58,51 +68,55 @@ export async function applyWord(space: Space, pass: Bead, owner: string): Promis
   const reason = typeof pass.close_reason === "string" ? pass.close_reason : "";
   const word = parseWord(reason);
   const done: Applied = { pass: pass.id, word: reason, applied: word.kind };
-  const phases = (await space.blocked(pass.id)).filter((bead) => bead.issue_type !== "epic");
+  const phases = (await space.blocks(pass.id)).filter((bead) => bead.issue_type !== "epic");
   const order = typeof pass.parent === "string" && pass.parent !== "" ? pass.parent : phases.map((phase) => phase.parent).find((parent): parent is string => typeof parent === "string" && parent !== "");
   if (order !== undefined) done.order = order;
+  const byHand = (what: string): Promise<void> | undefined =>
+    order === undefined ? undefined : space.update(orderRef(order), { appendNotes: `${pass.id} (${pass.title}) closed with "${reason.trim()}", ${what}: the order stays open for ${owner} to continue by hand` });
 
   if (word.kind === "retry") {
     done.phases = [];
     if (word.station !== undefined) done.station = word.station;
     for (const phase of phases) {
-      await space.update(phase, { ...reopened(phase), ...(word.station === undefined ? {} : moved(phase, word.station)) });
+      await space.update(phase, retried(phase, word.station));
       done.phases.push(phase.id);
     }
+    // The `no station for` pass blocks its order and no phase was laid behind it: nothing to reopen.
+    if (!phases.length) await byHand("but no phase is laid behind the pass");
   } else if (word.kind === "stop") {
     done.closed = [];
     if (order !== undefined) {
-      // bd refuses to close an epic with open children: the order's open phases close first, with the same word.
+      // bd refuses to close an epic with open children: the order's open phases close first, with the
+      // same word. An open pass of another phase is left to its owner and makes bd refuse the order.
       for (const child of (await space.list({ parent: order })).filter((bead) => bead.issue_type !== "gate" && bead.status !== "closed")) {
         await space.close(child, reason);
         done.closed.push(child.id);
       }
-      await space.close({ id: order, issue_type: "epic" }, reason);
+      await space.close(orderRef(order), reason);
       done.closed.push(order);
     }
-  } else if (order !== undefined) {
-    await space.update({ id: order, issue_type: "epic" }, {
-      appendNotes: `${pass.id} (${pass.title}) closed with "${word.word}", neither retry nor stop: the order stays open for ${owner} to continue by hand`,
-    });
+  } else {
+    await byHand("neither retry nor stop");
   }
 
   await space.update(pass, { addLabels: [APPLIED] });
   return done;
 }
 
-/** Open again, the failure count gone. */
-function reopened(phase: Bead) {
+/** Open again with the failure count gone; moved to the station named, the `station:` label following so a reclaim restores it there. */
+function retried(phase: Bead, station: string | undefined): UpdateFields {
   const count = failures(phase);
-  return { status: "open", removeLabels: count ? [`${FAILED}:${count}`] : [] };
-}
-
-/** Assigned to another station, the `station:` label following, so a reclaim restores it there. */
-function moved(phase: Bead, station: string) {
+  const fields: UpdateFields = { status: "open", removeLabels: count ? [`${FAILED}:${count}`] : [] };
+  if (station === undefined) return fields;
   const from = labelValue(phase, "station");
-  const count = failures(phase);
   return {
+    ...fields,
     assignee: station,
     addLabels: [`station:${station}`],
-    removeLabels: [...(count ? [`${FAILED}:${count}`] : []), ...(from !== undefined && from !== station ? [`station:${from}`] : [])],
+    removeLabels: [...(fields.removeLabels ?? []), ...(from !== undefined && from !== station ? [`station:${from}`] : [])],
   };
+}
+
+function orderRef(id: string): BeadRef {
+  return { id, issue_type: "epic" };
 }

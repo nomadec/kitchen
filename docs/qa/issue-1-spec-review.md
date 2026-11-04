@@ -201,3 +201,32 @@ Stand-in `claude` (database `kitchen_smoke_20261103_083833`): all nine checks PA
 | Minimum integration coverage | PASS (first journey) with the stand-in; BLOCKED with the real `claude` | Register recipe and station, add an order, reach a briefed pass, answer as a human, observe the continuation: the smoke's checks 2 to 8. The other three journeys NOT RUN |
 
 Unblock: sign `claude` in on the host (`claude /login`, or an `ANTHROPIC_API_KEY` the CLI accepts) and run `node scripts/smoke.ts` again; the run record is complete when the real-`claude` row of checks 5 to 9 reads PASS.
+
+## Run record: the smoke on a local space, 2026-11-04
+
+`node scripts/smoke.ts --local` on the development host, twice against the real `claude`, signed in through an API key helper: the first run failed check 8 (the turn behind the pass labelled it `applied` and closed the order, but skipped the pass phase's **Apply** command and read the word from the close reason: issue #14), the second, after the driver's reconcile step was reworded to run every Apply command as written, passed every check. The space was an embedded beads workspace under the run directory: no Dolt server, no credentials file.
+
+- Date: 2026-11-04
+- Kitchen commit: `2ef71fc` with the `local-space` branch in the working tree (`kitchen init --local`, the UI's API answered by `bd` calls, the smoke's `--local`); the branch's commit is recorded on its pull request
+- Recipe revision: the smoke fixture `scripts/smoke-fixture`, `smoke rev:5dcf53d`
+- Tool versions: bd 1.3.1 (c1c4b642a), claude 2.1.318 (Claude Code), Node v24.6.0; no Dolt binary on the host
+- Test space, repositories, hosts, and stations: the run directory `~/kitchen-smoke-local` (config, state and the embedded space), no repository, host `Umids-Max-MacBook.local`, owner `smoke`, one unattended station `smoke/smoke` (cap 1, timeout 10m), model `claude-sonnet-5` at effort `low`
+- Recorded spec interpretations: as in the run of 2026-11-03
+
+Second run (passing): order kitchen-46k; entry kitchen-46k.1 closed by the first turn; pass kitchen-w1r (`approve`, by `smoke/smoke`, brief present) blocking kitchen-46k.2 (`confirm`); `kitchen pass` under the station actor refused, the owner's close with `go` accepted; the next tick ran kitchen-46k.2 once (exit 0, `Order done: smoke, no pull request`), the pass labelled `applied`, one `answer: go` line, a further tick started nothing; the order closed with its result line.
+
+| Check | Result | Evidence / bead IDs / follow-up |
+| --- | --- | --- |
+| 1. First-turn startup | PASS (first box) | kitchen-46k.1 laid and assigned mechanically to the one eligible station, on an embedded space |
+| 2. Claims and recovery | PASS (first box) | the take, the claim and the heartbeats under the station actor in the expeditor log; nothing else exercised |
+| 3. Attended interaction | NOT RUN | unattended station |
+| 4. Human-answer continuation | PASS with the real `claude` (first and third box) | the CLI answer, one continuation turn, the word applied once; the first run's miss is issue #14 |
+| 5. Cross-host coordination | NOT RUN | one host, local space |
+| 6. Station handoffs | NOT RUN | no repository |
+| 7. Human-only trust boundary | PASS (third box) | `kitchen pass` under the station actor refused before any `bd` call |
+| 8. Recipe update semantics | NOT RUN | one revision |
+| 9. Umka migration | BLOCKED | the migrated plugin is not on this host |
+| 10. Merge verification | NOT RUN | no code |
+| Minimum integration coverage | PASS (first journey) with the real `claude` | checks 2 to 9 of the smoke |
+
+The real-`claude` release gate of the run of 2026-11-03 is met by this run for checks 5 to 9 on a local space; the same run against a shared space on a server is still to be made.

@@ -7,7 +7,7 @@
 // Every step writes one log line; what a step drops or starts is logged with the reason.
 import { expeditorActor, parseActor, stationActor } from "../actor.ts";
 import type { Clock } from "../clock.ts";
-import { readHostConfig } from "../config.ts";
+import { describeSpace, readHostConfig } from "../config.ts";
 import type { HostConfig } from "../config.ts";
 import { FAILURES_BEFORE_PASS, parseLaidPhase, LaidPhaseError, restoreStation, WAITING } from "../laid.ts";
 import type { LaidPhase } from "../laid.ts";
@@ -347,7 +347,7 @@ export function expeditor(deps: ExpeditorDeps): Expeditor {
         log(tick, "config", { stopped: "no host config: run kitchen init first" });
         return report;
       }
-      log(tick, "config", { owner: config.owner, host: config.host, server: `${config.server.host}:${config.server.port}` });
+      log(tick, "config", { owner: config.owner, host: config.host, space: describeSpace(config) });
       const state: TickState = {
         config,
         space: openSpace({ runner: deps.runner, env: deps.env, config, actor: expeditorActor(config.owner) }),

@@ -1,6 +1,5 @@
 // The one door to the space: every bd call Kitchen makes is built here, under one actor, over the
 // connection kitchen init wrote from the host config (the beads workspace and the credential file).
-// The one bd process built elsewhere is `bd serve` (expeditor/serve.ts), over the same connection.
 // Thin argv builders over bd 1.3.1; the refusals are the cooperative rules of docs/trust-model.md,
 // judged before any call is issued.
 import { actorName, RULE } from "./actor.ts";
@@ -82,6 +81,8 @@ export interface BeadFilter {
   externalContains?: string;
   /** Closed beads too: the children of an order a laying turn counts and dedupes against. */
   all?: boolean;
+  /** At most this many; every one when absent or 0. */
+  limit?: number;
 }
 
 export interface GateFields {
@@ -169,8 +170,8 @@ export interface Space {
   checkGates(type?: GateType): Promise<GateCheck | undefined>;
   /** The beads this one blocks: the phase behind a gate. */
   blocks(id: string): Promise<Bead[]>;
-  /** The events journal after a sequence number. */
-  events(since: number): Promise<JournalEvent[]>;
+  /** The events journal after a sequence number: every record when no limit is given. */
+  events(since: number, limit?: number): Promise<JournalEvent[]>;
   /**
    * Claims the bead atomically under this actor, as `bd update --claim` does: the take on an order and
    * the claim on a phase, both of which beads requires from the holder (story 60). Idempotent when this
@@ -194,9 +195,17 @@ export interface ReclaimedLease {
 }
 
 
-/** The connection every bd call runs over: the beads workspace as its cwd, the credential file in its env. */
-export function spaceConnection(env: Record<string, string | undefined>, config: Pick<HostConfig, "credential">): { cwd: string; env: { BEADS_CREDENTIALS_FILE: string } } {
-  return { cwd: spaceDir(env), env: { BEADS_CREDENTIALS_FILE: config.credential } };
+/**
+ * The connection every bd call runs over: the beads workspace as its cwd and, for a space on a server,
+ * the credential file in its env. A local space names no credential: embedded beads reads none.
+ */
+export function spaceConnection(env: Record<string, string | undefined>, config: Pick<HostConfig, "credential">): { cwd: string; env: Record<string, string> } {
+  return { cwd: spaceDir(env), env: credentialEnv(config) };
+}
+
+/** The env entry naming the credential file, or nothing for a local space. */
+export function credentialEnv(config: Pick<HostConfig, "credential">): Record<string, string> {
+  return config.credential === undefined ? {} : { BEADS_CREDENTIALS_FILE: config.credential };
 }
 
 export function openSpace(deps: SpaceDeps): Space {
@@ -290,7 +299,7 @@ export function openSpace(deps: SpaceDeps): Space {
         ...each("--label", filter.labels),
         ...flag("--type", filter.type),
         ...flag("--parent", filter.parent),
-        "--limit", "0",
+        "--limit", String(filter.limit ?? 0),
       ]),
 
     list: (filter = {}) =>
@@ -305,7 +314,7 @@ export function openSpace(deps: SpaceDeps): Space {
         ...flag("--external-ref", filter.externalRef),
         ...flag("--external-contains", filter.externalContains),
         ...(filter.all ? ["--all"] : []),
-        "--limit", "0",
+        "--limit", String(filter.limit ?? 0),
       ]),
 
     show,
@@ -357,8 +366,8 @@ export function openSpace(deps: SpaceDeps): Space {
 
     blocks: (id) => bdJson<Bead[]>(["dep", "list", id, "--direction", "up", "--type", "blocks"]),
 
-    events: async (since) => {
-      const { stdout } = await bd(["events", "tail", "--since", String(since)]);
+    events: async (since, limit) => {
+      const { stdout } = await bd(["events", "tail", "--since", String(since), ...(limit === undefined ? [] : ["--limit", String(limit)])]);
       return stdout
         .split("\n")
         .filter((line) => line.trim() !== "")

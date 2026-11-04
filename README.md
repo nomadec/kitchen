@@ -33,7 +33,7 @@ The CLI has these ten commands and nothing else (spec: Human surfaces). Each ans
 
 | Command | What it does |
 | --- | --- |
-| `kitchen init` | Write this host's config and verify the connection to the space |
+| `kitchen init` | Write this host's config and set the space up: a shared server, or a local space of this host's own |
 | `kitchen up` | Start this host's expeditor as a user service (`--foreground` runs it here, `--once` one tick) |
 | `kitchen down` | Stop the expeditor, leaving claimed phases reclaimable |
 | `kitchen order add` | Add an order from a GitHub issue URL, a file or a sentence |
@@ -46,22 +46,28 @@ The CLI has these ten commands and nothing else (spec: Human surfaces). Each ans
 
 ## `kitchen init`
 
-A new host is ready in one step. `kitchen init` writes the host config and verifies the connection to the space:
+A new host is ready in one step. `kitchen init` writes the host config and sets the space up. There are two kinds of space. A **shared** space is a database on a Dolt SQL server (`docs/onboarding.md`: the server install, one SQL credential per person), and every host that points at it works the same graph. A **local** space is an embedded beads workspace on this host alone: nothing to install beyond `bd`, nothing to connect to, for one person on one machine.
 
 ```sh
-kitchen init --server rbn3:3307 --owner sona
+kitchen init --server rbn3:3307 --owner sona     # the shared space on the team server
+kitchen init --local --owner sona                # a space of this host's own
 ```
 
 | Option | Meaning | Default |
 | --- | --- | --- |
-| `--server <host:port>` | The Dolt SQL server the space lives on | required |
+| `--server <host:port>` | The Dolt SQL server the shared space lives on | one of `--server` and `--local` |
+| `--local` | A local space: an embedded beads workspace, no server | |
 | `--owner <name>` | The person this host belongs to; the human actor on every write | required |
-| `--database <name>` | The space's database on that server | `kitchen` |
-| `--user <name>` | The SQL user; one per person, shared with that person's stations | the owner |
-| `--credential <file>` | The beads credentials file whose `[host:port]` section holds the password | `~/.config/beads/credentials` |
 | `--host <name>` | This host's name, as stations registered here carry it | the hostname |
+| `--database <name>` | With `--server`: the space's database on that server | `kitchen` |
+| `--user <name>` | With `--server`: the SQL user; one per person, shared with that person's stations | the owner |
+| `--credential <file>` | With `--server`: the beads credentials file whose `[host:port]` section holds the password | `~/.config/beads/credentials` |
 
-The config lands in `$XDG_CONFIG_HOME/kitchen/config.json` (`~/.config/kitchen/config.json` by default) and holds the server, the credential reference, the owner and the host. No secret is written: the password stays in the beads credentials file the reference names. Next to it, `kitchen init` creates the beads workspace under `~/.config/kitchen/space` that every later `bd` command runs from, by running `bd init --server --external` against the configured server under the owner's actor. bd 1.3.1 reads the credentials file for every command after that one, but `bd init` itself takes the password from `BEADS_DOLT_PASSWORD` only, so `kitchen init` reads the `[host:port]` section of the file and passes its password to that one call in its environment; a file or a section that is missing is refused before any command is issued. That call is the verification: when the server cannot be reached, `kitchen init` prints the command's stderr, exits non-zero and writes no config. A database that does not exist on the server yet is created by it, which is how the smoke gets a database of its own. Running `kitchen init` again re-initialises the existing workspace in place (local metadata only; the server's data is untouched) and a failed run never removes a workspace or a config that was already there.
+The config lands in `$XDG_CONFIG_HOME/kitchen/config.json` (`~/.config/kitchen/config.json` by default) and holds the owner and the host, plus the server and the credential reference for a shared space. No secret is written: the password stays in the beads credentials file the reference names. Next to it, `kitchen init` creates the beads workspace under `~/.config/kitchen/space` that every later `bd` command runs from, under the owner's actor: `bd init --server --external` against the configured server for a shared space, `bd init` alone for a local one (embedded Dolt, no agent files, no git hooks). Then it sets what the space needs from beads, `types.custom` to Kitchen's three registered types and `events-journal` on, the same values `scripts/install-server.sh` sets for the team space, so a fresh database is ready and a configured one is unchanged.
+
+For a shared space, bd 1.3.1 reads the credentials file for every command after init, but `bd init` itself takes the password from `BEADS_DOLT_PASSWORD` only, so `kitchen init` reads the `[host:port]` section of the file and passes its password to that one call in its environment; a file or a section that is missing is refused before any command is issued. That call is the verification: when the server cannot be reached, `kitchen init` prints the command's stderr, exits non-zero and writes no config. A database that does not exist on the server yet is created by it, which is how the smoke gets a database of its own. Running `kitchen init` again re-initialises the existing workspace in place (local metadata only; a server's data is untouched) and a failed run never removes a workspace or a config that was already there.
+
+A local space is one host's: a second host cannot point at it, and a station handoff across hosts needs a shared space. Everything else is the same, the expeditor, the UI, every command.
 
 ## `kitchen recipe add`
 
@@ -79,7 +85,7 @@ Registration is a human act: both commands run under the owner's bare actor and 
 
 `kitchen up` installs this host's expeditor as a user service and starts it: a systemd user unit at `~/.config/systemd/user/kitchen-expeditor.service` on Linux, a launchd agent at `~/Library/LaunchAgents/ai.nomadec.kitchen.expeditor.plist` on macOS. The unit runs `kitchen up --foreground --interval <seconds>` (default 5), the long-lived process itself; `kitchen up --foreground --once` runs one tick in the terminal and waits for the turns it started, for a check by hand. `kitchen down` stops the service and removes the unit; the claims its turns hold are left as they are, so their leases go stale and a later tick reclaims them.
 
-The foreground process also serves the UI and runs `bd serve` beside the tick, both bound to loopback: the UI on `--port` (4817 by default, written into the unit) and `bd serve` on the next port, behind a token file the expeditor generates at each start (`~/.local/state/kitchen/serve.token`, mode 0600). The UI server passes every `/v0/...` request through to `bd serve` with the browser's bearer token, so the page and the API share one port and the UI never holds the SQL credential. `kitchen down` stops all three with the service. The first view is Pass: every open pass with its order, brief and an answer box; the word closes the gate under your name. `docs/ui.md` has the token, the ports and how to reach the page from a phone.
+The foreground process also serves the UI beside the tick, bound to loopback on `--port` (4817 by default, written into the unit), behind a token file the expeditor generates at each start (`~/.local/state/kitchen/serve.token`, mode 0600). The page's API, the `/v0/...` routes the views read and write the space through, is answered by the same process with `bd` calls over the space connection, under the browser's bearer token, so the page and the API share one port, a local space serves the same page as a shared one, and the UI never holds the SQL credential. `kitchen down` stops both with the service. The first view is Pass: every open pass with its order, brief and an answer box; the word closes the gate under your name. `docs/ui.md` has the token, the ports and how to reach the page from a phone.
 
 Each tick is a sequence of named steps, in the order the spec lays them: `config`, `stations`, `gates`, `passes`, `sources`, `leases`, `reclaim`, `worktrees`, `ready`, `orders`, `caps`, `attended`, `dispatch`. What runs today: the stations whose owner and host match the config are read; the sources whose owner and host match are polled since the cursor on each bead, a `github` source for the issues of its repository updated since then (through `gh issue list`), a `file` source for the lines of a JSON Lines file after a line offset, and each new item becomes an order through intake with the source's recipe and class, the cursor advanced on the bead after each order (so an interruption between the two re-lists the item and the duplicate check, not a second order, answers it; `docs/intake.md`); the typed gates are evaluated (`gates`) and the word on closed Kitchen-laid passes applied (`passes`), both below; the turns whose children live are listed (`leases`); the stale leases in the space are reclaimed (`bd reclaim`) and, since reclaim clears the assignee, each reclaimed phase is assigned again to the station its `station:` label names, so it returns to the station it was laid for (a reclaimed order has no such label and stays released); the worktrees of closed orders under this host's checkouts are removed (see below); `bd ready` is listed per station assignee; a phase whose order is taken by a turn (a `loop` epic in progress and assigned to a station, on any host) is dropped; a station at its `cap:` is dropped; a phase on an attended station is labelled `waiting` and listed with the `kitchen turn <phase>` command that starts it; every remaining phase on an unattended station is started: the order is taken (`bd update <order> --claim` under the station actor, the per-order limit held in the space), its worktrees are created or reused, the phase is claimed the same way, and the runner is spawned. At the turn's end the last line of the session's output is commented on the phase bead and the order is released.
 
@@ -156,16 +162,15 @@ Who writes as whom is provenance, not a lock. A person writes as their name, a t
 
 ## The smoke
 
-One smoke, run by hand before a release, proves the loop against a real `bd` and a real `claude` (spec story 81). From a built clone, with a server and a SQL user allowed to create a throwaway database:
+One smoke, run by hand before a release, proves the loop against a real `bd` and a real `claude` (spec story 81). From a built clone, against a local space of the run's own, or a server and a SQL user allowed to create a throwaway database:
 
 ```sh
 npm run build
+node scripts/smoke.ts --local
 node scripts/smoke.ts --server rbn3:3307 --user sona --credential ~/.config/beads/credentials
 ```
 
-It creates a database of its own on the server (`kitchen_smoke_<stamp>`, through `kitchen init` under a config and state directory of the run's own, so this host's kitchen config is untouched), registers a recipe from a plugin directory (`--plugin`; the fixture under `scripts/smoke-fixture` by default: an entry phase `greet` for an idea, the pass `approve` and the phase `confirm` behind it; the Umka plugin's directory once its migration has landed), registers one unattended station on this host from the plugin's `station.json` (else the fixture's), adds one synthetic order of class `idea` (`--class` for another), and runs the expeditor tick by tick (`kitchen up --foreground --once`) within `--minutes`. It asserts that the order reaches its first pass with a brief, laid and assigned by a turn; that `kitchen pass` under a station actor is refused and the pass closes only under the human actor; that the phase behind the pass runs and applies the word (`--word`, `go` by default) once, with the pass labelled `applied` and a further tick starting nothing; and that the order closes with its result line. It prints the bead ids it created, the expeditor log and one run-record row per check, PASS, FAIL or BLOCKED (a check that cannot run on this host, such as a `claude` that is not signed in), and exits 0 only when every check passed. The database is left on the server for the record and dropped by hand.
-
-For a host without a team server, a throwaway Dolt SQL server does: `DOLT_ROOT_HOST=% DOLT_ROOT_PASSWORD=<pw> dolt sql-server --host 127.0.0.1 --port 3399` in an empty directory, a credentials file with a `[127.0.0.1:3399]` section, then `--server 127.0.0.1:3399 --user root`.
+It creates a space of its own (with `--local` an embedded beads workspace under the run directory; with `--server` the database `kitchen_smoke_<stamp>` on the server; either through `kitchen init` under a config and state directory of the run's own, so this host's kitchen config is untouched), registers a recipe from a plugin directory (`--plugin`; the fixture under `scripts/smoke-fixture` by default: an entry phase `greet` for an idea, the pass `approve` and the phase `confirm` behind it; the Umka plugin's directory once its migration has landed), registers one unattended station on this host from the plugin's `station.json` (else the fixture's), adds one synthetic order of class `idea` (`--class` for another), and runs the expeditor tick by tick (`kitchen up --foreground --once`) within `--minutes`. It asserts that the order reaches its first pass with a brief, laid and assigned by a turn; that `kitchen pass` under a station actor is refused and the pass closes only under the human actor; that the phase behind the pass runs and applies the word (`--word`, `go` by default) once, with the pass labelled `applied` and a further tick starting nothing; and that the order closes with its result line. It prints the bead ids it created, the expeditor log and one run-record row per check, PASS, FAIL or BLOCKED (a check that cannot run on this host, such as a `claude` that is not signed in), and exits 0 only when every check passed. The space is left for the record, the database on the server or the run directory on disk, and removed by hand.
 
 On a host where `claude` is not signed in, `PATH=scripts/smoke-standin:$PATH` puts a stand-in `claude` in front of the real one: a shell script that does, mechanically, what the turn driver asks for the fixture's two worked phases through the lay helper. It proves the harness (every `bd` write and read, the expeditor, `kitchen pass`, the answer applied once) and nothing about the turn driver's prose; a release still needs the real run.
 
@@ -187,7 +192,7 @@ Each line names a Kitchen primitive and the beads feature under it. The glossary
 | Ready work | `bd ready` | yes |
 | Claim | `bd update --claim`, atomic in the SQL server | yes |
 | Lease | `bd heartbeat` while the session lives, `bd reclaim` when it dies | yes |
-| Pass | A gate bead of type `human`; the UI closes it through `bd serve` with the word as the reason | yes |
+| Pass | A gate bead of type `human`; the UI closes it with the word as the reason | yes |
 | External wait | Gate beads of type `timer`, `gh:pr`, `gh:run`, `bead`, evaluated by `bd gate check` | yes |
 | Dependency | `bd dep`, blocking edges between laid phases | yes |
 | Actor | `--actor` on every write, in the audit trail; the rules are cooperative, see `docs/trust-model.md` | yes |

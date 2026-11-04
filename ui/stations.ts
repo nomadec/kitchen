@@ -1,4 +1,4 @@
-// The Stations view's data layer (spec: UI, story 67): every registered station read from bd serve
+// The Stations view's data layer (spec: UI, story 67): every registered station read from the API
 // with its owner, host, what it offers and its cap, the turns it runs now, and at an attended station
 // the phases the expeditor marked waiting for `kitchen turn` with the exact command that starts each
 // (no start button in v1: the turn is attended, so it runs in the human's own terminal). Reads only.

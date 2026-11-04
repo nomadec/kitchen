@@ -1,4 +1,4 @@
-// The Pass view's data layer against a scripted fetch: open passes read from bd serve with their order
+// The Pass view's data layer against a scripted fetch: open passes read from the API with their order
 // and brief, the close posted with the word under the human actor, and the refusals before any request.
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -17,7 +17,7 @@ const ORDER = { id: "kitchen-20", title: "Stale cookie", status: "in_progress", 
 
 const LIST = "/v0/beads/issues?type=gate&status=open&limit=0";
 
-test("the Pass view lists every open pass from bd serve under the token, with its order's title and the brief, and leaves the typed waits out", async () => {
+test("the Pass view lists every open pass from the API under the token, with its order's title and the brief, and leaves the typed waits out", async () => {
   const api = scriptedFetch([
     { method: "GET", url: LIST, status: 200, body: JSON.stringify({ has_more: false, items: [PASS, TIMER, UNBRIEFED] }) },
     { method: "GET", url: "/v0/beads/issues/kitchen-20", status: 200, body: JSON.stringify(ORDER) },
@@ -52,7 +52,7 @@ test("the Pass view lists every open pass from bd serve under the token, with it
   ]);
 });
 
-test("an answer closes the pass through bd serve with the word as the reason under the human actor, and nothing else", async () => {
+test("an answer closes the pass through the API with the word as the reason under the human actor, and nothing else", async () => {
   const api = scriptedFetch([
     { method: "POST", url: "/v0/beads/issues/kitchen-33:close", status: 200, body: JSON.stringify({ already_closed: false, issue: { ...PASS, status: "closed", close_reason: "ship" } }) },
   ]);
@@ -82,7 +82,7 @@ test("a station actor, and the expeditor, may not close a pass through the UI: r
   }
 });
 
-test("an empty word is refused before any request; a refused token and a bd serve refusal are reported with their detail", async () => {
+test("an empty word is refused before any request; a refused token and a the API refusal are reported with their detail", async () => {
   const empty = scriptedFetch([]);
   await assert.rejects(() => passView({ fetch: empty.fetch, token: "tok123", actor: "sona" }).answer({ id: "kitchen-33" }, "   "), /the word is empty/);
   assert.equal(empty.requests.length, 0);
@@ -93,5 +93,5 @@ test("an empty word is refused before any request; a refused token and a bd serv
   ]);
   const view = passView({ fetch: refused.fetch, token: "stale", actor: "sona" });
   await assert.rejects(() => view.list(), (error: unknown) => error instanceof ViewError && error.message === "the token was refused: missing or invalid bearer token" && error.status === 401);
-  await assert.rejects(() => view.answer({ id: "kitchen-33" }, "ship"), (error: unknown) => error instanceof ViewError && error.message === "bd serve refused the close of kitchen-33: kitchen-33 is already closed" && error.status === 409);
+  await assert.rejects(() => view.answer({ id: "kitchen-33" }, "ship"), (error: unknown) => error instanceof ViewError && error.message === "the space refused the close of kitchen-33: kitchen-33 is already closed" && error.status === 409);
 });

@@ -1,7 +1,7 @@
 // The page in the browser: four views, Pass, Orders, Stations and Activity, chosen by the location
 // hash (`#pass`, `#orders`, `#stations`, `#activity`) so each is a link a phone can bookmark. The
 // token is asked for once and kept in local storage, the owner read from the expeditor's /me.
-// Everything that talks to bd serve is in the view modules; this file only draws.
+// Everything that talks to the API is in the view modules; this file only draws.
 import { activityView } from "./activity.ts";
 import type { JournalEntry } from "./activity.ts";
 import { ViewError } from "./client.ts";
@@ -17,7 +17,7 @@ const TOKEN_KEY = "kitchen.token";
 
 type View = "pass" | "orders" | "stations" | "activity";
 
-/** What the browser holds once the token is in: the way to bd serve, and the owner every answer is written as. */
+/** What the browser holds once the token is in: the way to the API, and the owner every answer is written as. */
 interface Session extends ClientDeps {
   owner: string;
 }

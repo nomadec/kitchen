@@ -1,4 +1,4 @@
-// The Orders view's data layer against a scripted fetch: every order read from bd serve, closed ones
+// The Orders view's data layer against a scripted fetch: every order read from the API, closed ones
 // too (the twenty closed last), grouped by status in a fixed order, each with its class, the recipe revision it pinned and the
 // phases it is at now, read from its open children.
 import { test } from "node:test";
@@ -72,7 +72,7 @@ test("the Orders view lists every open order and the orders closed last under th
   ]);
 });
 
-test("a refused token stops the Orders view at the list, with bd serve's detail and the status", async () => {
+test("a refused token stops the Orders view at the list, with the API's detail and the status", async () => {
   const api = scriptedFetch([{ method: "GET", url: LIST, status: 401, body: '{"code":"unauthenticated","detail":"missing or invalid bearer token"}' }]);
   const view = ordersView({ fetch: api.fetch, token: "stale" });
   await assert.rejects(

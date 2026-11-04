@@ -3,5 +3,5 @@ export { fakeRunner } from "./fake-runner.ts";
 export type { FakeRunner, RecordedCall, ScriptedAnswer, ScriptedCommand } from "./fake-runner.ts";
 export { fakeClock } from "./fake-clock.ts";
 export type { FakeClock } from "./fake-clock.ts";
-export { initialisedHost, TEST_HOST_CONFIG, TEST_PROGRAM } from "./host.ts";
+export { initialisedHost, LOCAL_HOST_CONFIG, TEST_HOST_CONFIG, TEST_PROGRAM } from "./host.ts";
 export type { InitialisedHost, HostOptions } from "./host.ts";

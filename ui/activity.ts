@@ -1,5 +1,5 @@
 // The Activity view's data layer (spec: UI, story 68): the latest records of the events journal, read
-// from bd serve's events route and listed newest first, so what changed while the human was away is
+// from the API's events route and listed newest first, so what changed while the human was away is
 // one page. The route reads forward from a sequence number, so the view asks for the head first and
 // then for the records behind it. Reads only. No DOM here.
 import { client } from "./client.ts";
@@ -24,7 +24,7 @@ export interface ActivityView {
   latest(count?: number): Promise<JournalEntry[]>;
 }
 
-/** A record as bd serve's events route answers it; only the fields the view reads are named. */
+/** A record as the API's events route answers it; only the fields the view reads are named. */
 interface JournalRecord {
   seq: number;
   ts: string;

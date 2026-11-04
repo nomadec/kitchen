@@ -11,7 +11,7 @@ const LAUNCHD_LABEL = "ai.nomadec.kitchen.expeditor";
 /** Seconds between ticks when `kitchen up` is given no interval. */
 export const DEFAULT_INTERVAL = 5;
 
-/** The loopback port the expeditor serves the UI on when `kitchen up` is given no port; bd serve takes the next one. */
+/** The loopback port the expeditor serves the UI on when `kitchen up` is given no port. */
 export const DEFAULT_PORT = 4817;
 
 /** The environment entries the service carries over from the shell `kitchen up` ran in. */

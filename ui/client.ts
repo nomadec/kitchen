@@ -1,5 +1,5 @@
-// What every view shares of bd serve: the bearer token on each request, through the expeditor's own
-// port, and a refusal (the token's, or bd serve's with its detail) as one error the page can show.
+// What every view shares of the API: the bearer token on each request, through the expeditor's own
+// port, and a refusal (the token's, or the space's with its detail) as one error the page can show.
 
 export interface ClientDeps {
   fetch: typeof fetch;
@@ -7,7 +7,7 @@ export interface ClientDeps {
   token: string;
 }
 
-/** A refusal, by the view itself (no request made) or by bd serve (its status and detail). */
+/** A refusal, by the view itself (no request made) or by the API (its status and detail). */
 export class ViewError extends Error {
   readonly status: number | undefined;
   constructor(message: string, status?: number) {
@@ -17,7 +17,7 @@ export class ViewError extends Error {
   }
 }
 
-/** What bd serve answers a request it refuses. */
+/** What the API answers a request it refuses. */
 export interface Problem {
   detail?: string;
   code?: string;
@@ -37,7 +37,7 @@ export function client(deps: ClientDeps): Client {
   const refused = (status: number, body: Problem, what: string): ViewError =>
     status === 401
       ? new ViewError(`the token was refused: ${body.detail ?? "missing or invalid bearer token"}`, status)
-      : new ViewError(`bd serve refused ${what}: ${body.detail ?? body.code ?? `status ${status}`}`, status);
+      : new ViewError(`the space refused ${what}: ${body.detail ?? body.code ?? `status ${status}`}`, status);
   const get = async <T>(path: string): Promise<{ status: number; body: T }> => {
     const response = await deps.fetch(path, { headers });
     return { status: response.status, body: (await response.json()) as T };

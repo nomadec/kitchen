@@ -4,7 +4,7 @@ status: accepted
 
 # One resident expeditor per host, instead of timers
 
-Umka ran its tick and inbox as launchd and systemd timers every ten seconds, serially, with one shared home. Kitchen runs one long-lived expeditor process per host, which polls the space for phases assigned to the stations registered on that host, starts them in parallel across orders up to each station's cap, heartbeats their leases, evaluates typed gates, serves the UI and exposes `bd serve`. A resident process can hold leases, track child processes and enforce wall-clock budgets, which a timer-started script cannot do without a journal on disk.
+Umka ran its tick and inbox as launchd and systemd timers every ten seconds, serially, with one shared home. Kitchen runs one long-lived expeditor process per host, which polls the space for phases assigned to the stations registered on that host, starts them in parallel across orders up to each station's cap, heartbeats their leases, evaluates typed gates, and serves the UI with the API behind it. A resident process can hold leases, track child processes and enforce wall-clock budgets, which a timer-started script cannot do without a journal on disk.
 
 ## Consequences
 

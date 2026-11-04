@@ -58,7 +58,7 @@ One pass of the expeditor over the work graph.
 
 ## Team space
 
-The work graph every member and every station can read and write.
+The work graph every member and every station can read and write: a database on a Dolt SQL server every host points at. A local space is the same graph for one host alone, an embedded beads workspace, with no server to join.
 
 ## Host
 

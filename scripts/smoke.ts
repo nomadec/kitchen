@@ -2,8 +2,10 @@
 // The hand-run smoke (spec story 81), run before a release against a real bd and a real claude:
 //
 //     node scripts/smoke.ts --server 127.0.0.1:3307 --user root --credential ~/.config/beads/credentials
+//     node scripts/smoke.ts --local
 //
-// It creates a separate database on the server through kitchen init, registers a recipe from the
+// It creates a space of the run's own through kitchen init (a separate database on the server, or
+// with --local an embedded beads workspace under the run directory), registers a recipe from the
 // plugin directory given (--plugin; the fixture under scripts/smoke-fixture by default, the migrated
 // Umka plugin once it has its phase directory), registers one unattended station on this host, adds
 // one synthetic order, runs the expeditor tick by tick (kitchen up --foreground --once) within a bound,
@@ -15,9 +17,7 @@
 // This is the one script that runs outside the command-runner seam, on purpose: it is the integration
 // evidence for the real processes, so it spawns the kitchen command, bd and (through the expeditor)
 // claude itself and reads the host's clock for its bound. Every write to the space goes through a
-// kitchen command, or through bd under the owner's actor for the two config keys the server install
-// script sets for the team space; the reads are bd --json over the space kitchen init wrote, and the
-// expeditor's log. Not a CLI command, and not a unit test: the fixture it ships is tested in
+// kitchen command; the reads are bd --json over the space kitchen init wrote, and the expeditor's log. Not a CLI command, and not a unit test: the fixture it ships is tested in
 // scripts/smoke.test.ts, the smoke itself is the evidence.
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
@@ -31,12 +31,13 @@ const ROOT = path.resolve(import.meta.dirname, "..");
 const KITCHEN = path.join(ROOT, "dist", "bin", "kitchen.js");
 const FIXTURE = path.join(ROOT, "scripts", "smoke-fixture");
 
-const USAGE = `Usage: node scripts/smoke.ts --server <host:port> --user <sql user> --credential <file> [options]
+const USAGE = `Usage: node scripts/smoke.ts (--server <host:port> --user <sql user> --credential <file> | --local) [options]
 
 Options:
-  --server <host:port>    The Dolt SQL server to create the smoke's database on (required)
-  --user <name>           The SQL user; it must be allowed to create a database (required)
-  --credential <file>     The beads credentials file holding the [host:port] password (required)
+  --server <host:port>    The Dolt SQL server to create the smoke's database on
+  --user <name>           The SQL user; it must be allowed to create a database
+  --credential <file>     The beads credentials file holding the [host:port] password
+  --local                 No server: the space is an embedded beads workspace under the run directory
   --owner <name>          The human actor of the run (default: smoke)
   --plugin <dir>          The plugin directory to register the recipe from (default: scripts/smoke-fixture)
   --station <file>        The station template (default: <plugin>/station.json, else the fixture's)
@@ -100,7 +101,7 @@ interface Created {
 const values = parseArgs({
   args: process.argv.slice(2),
   options: {
-    server: { type: "string" }, user: { type: "string" }, credential: { type: "string" },
+    server: { type: "string" }, user: { type: "string" }, credential: { type: "string" }, local: { type: "boolean" },
     owner: { type: "string", default: "smoke" }, plugin: { type: "string", default: FIXTURE },
     station: { type: "string" }, class: { type: "string", default: "idea" }, word: { type: "string", default: "go" },
     minutes: { type: "string", default: "20" }, dir: { type: "string" }, help: { type: "boolean" },
@@ -112,17 +113,17 @@ if (values.help) {
   process.stdout.write(USAGE);
   process.exit(0);
 }
-if (!values.server || !values.user || !values.credential) {
-  process.stderr.write(`smoke: --server, --user and --credential are required\n\n${USAGE}`);
+if (values.local ? values.server || values.user || values.credential : !values.server || !values.user || !values.credential) {
+  process.stderr.write(`smoke: either --local, or --server, --user and --credential together\n\n${USAGE}`);
   process.exit(2);
 }
 
 const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\..*$/, "").replace("T", "_");
 const plugin = path.resolve(values.plugin);
+/** The space on a server, or undefined for a local one. */
+const server = values.local ? undefined : { address: values.server ?? "", user: values.user ?? "", credential: path.resolve(values.credential ?? "") };
 const options = {
-  server: values.server,
-  user: values.user,
-  credential: path.resolve(values.credential),
+  server,
   owner: values.owner,
   plugin,
   station: values.station ? path.resolve(values.station) : fs.existsSync(path.join(plugin, "station.json")) ? path.join(plugin, "station.json") : path.join(FIXTURE, "station.json"),
@@ -170,7 +171,7 @@ function succeeded(name: string, exit: Exit): Exit {
 function bdRun(args: string[]): Exit {
   const run = spawnSync("bd", ["--actor", options.owner, ...args], {
     cwd: spaceDir,
-    env: { ...process.env, BEADS_CREDENTIALS_FILE: options.credential },
+    env: { ...process.env, ...(server ? { BEADS_CREDENTIALS_FILE: server.credential } : {}) },
     encoding: "utf8",
   });
   return { status: run.status ?? 1, stdout: run.stdout ?? "", stderr: run.stderr ?? "" };
@@ -278,7 +279,7 @@ say(`  kitchen: ${version("git", "-C", ROOT, "rev-parse", "--short", "HEAD")} at
 say(`  bd: ${version("bd", "version")}`);
 say(`  claude: ${version("claude", "--version")}`);
 say(`  node: ${process.version}`);
-say(`  server: ${options.server} as ${options.user}; database: ${options.database}; owner: ${options.owner}`);
+say(server ? `  server: ${server.address} as ${server.user}; database: ${options.database}; owner: ${options.owner}` : `  space: local (embedded beads under the run directory); owner: ${options.owner}`);
 say(`  plugin: ${options.plugin}; station template: ${options.station}; class: ${options.class}; word: ${options.word}`);
 say(`  run directory: ${options.dir}`);
 
@@ -287,16 +288,13 @@ if (!fs.existsSync(KITCHEN)) {
   process.exit(2);
 }
 
-check("1. kitchen init creates the smoke's own database and the space", () => {
-  const init = succeeded("kitchen init", kitchen(["init", "--server", options.server, "--owner", options.owner, "--user", options.user, "--database", options.database, "--credential", options.credential]));
-  // What scripts/install-server.sh configures for the team space, done here for the smoke's database.
-  for (const [key, value] of [["types.custom", "phase,station,source"], ["events-journal", "true"]]) {
-    const set = bdRun(["config", "set", key ?? "", value ?? ""]);
-    if (set.status !== 0) throw new Error(`bd config set ${key} failed: ${set.stderr.trim()}`);
-  }
+check("1. kitchen init creates the smoke's own space", () => {
+  const init = succeeded("kitchen init", kitchen(server
+    ? ["init", "--server", server.address, "--owner", options.owner, "--user", server.user, "--database", options.database, "--credential", server.credential]
+    : ["init", "--local", "--owner", options.owner]));
   const beads = bd<Bead[] | null>(["list", "--all", "--limit", "0"]) ?? [];
-  if (beads.length !== 0) throw new Error(`the new database ${options.database} holds ${beads.length} beads already`);
-  return `${init.stdout.trim()}; ${options.database} is empty`;
+  if (beads.length !== 0) throw new Error(`the new space holds ${beads.length} beads already`);
+  return `${init.stdout.trim()}; the space is empty`;
 });
 
 check("2. kitchen recipe add registers the recipe from the plugin directory", () => {
@@ -398,10 +396,10 @@ check("9. the order closes with its result line", () => {
 
 say("");
 say("Bead ids:");
-say(`  database: ${options.database}`);
+say(server ? `  database: ${options.database}` : `  space: ${spaceDir}`);
 for (const [name, value] of Object.entries(created)) say(`  ${name}: ${Array.isArray(value) ? value.join(", ") : value}`);
 say(`Expeditor log: ${logFile}`);
-say(`Database left on ${options.server}: ${options.database} (drop it by hand when the record is written)`);
+say(server ? `Database left on ${server.address}: ${options.database} (drop it by hand when the record is written)` : `Space left at ${spaceDir} (remove the run directory when the record is written)`);
 say("");
 say("Run record rows:");
 say("| Check | Result | Evidence / bead IDs / follow-up |");

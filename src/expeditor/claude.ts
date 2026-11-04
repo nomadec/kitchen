@@ -12,6 +12,7 @@ import type { HostConfig } from "../config.ts";
 import type { LaidPhase } from "../laid.ts";
 import type { Order } from "../order.ts";
 import type { CommandResult, CommandRunner } from "../runner.ts";
+import { credentialEnv } from "../space.ts";
 import { offeredCheckouts } from "../station.ts";
 import type { LaunchSpec } from "../station.ts";
 import type { Worktree } from "./worktree.ts";
@@ -107,7 +108,7 @@ export function claudeRunner(deps: ClaudeRunnerDeps): TurnRunner {
       // The station title is the turn actor (spec: Store, Actors).
       BEADS_ACTOR: request.phase.station,
       BEADS_DIR: beadsDir(deps.env),
-      BEADS_CREDENTIALS_FILE: deps.config.credential,
+      ...credentialEnv(deps.config),
     };
     const killer = new AbortController();
     const handle: TurnHandle = {

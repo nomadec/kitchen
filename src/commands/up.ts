@@ -1,18 +1,16 @@
 // kitchen up: install and start this host's expeditor as a user service. With --foreground it is the
 // expeditor itself: the long-lived process the service unit runs, ticking every interval until it is
 // told to stop; --once runs one tick and waits for the turns it started, for a check by hand or a test.
-// The foreground process also runs bd serve behind a token file and serves the UI beside it (story 69).
+// The foreground process also serves the UI, and the API behind it, behind a token file (story 69).
 import fs from "node:fs";
-import net from "node:net";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import type { CliDeps, Command } from "../cli.ts";
-import { expeditorLogFile, expeditorStateFile, hostConfigFile, readHostConfig } from "../config.ts";
+import { expeditorLogFile, expeditorStateFile, hostConfigFile, readHostConfig, serveTokenFile } from "../config.ts";
 import type { HostConfig } from "../config.ts";
 import { claudeRunner } from "../expeditor/claude.ts";
 import { openLog } from "../expeditor/log.ts";
 import type { Log } from "../expeditor/log.ts";
-import { startServe } from "../expeditor/serve.ts";
 import { DEFAULT_INTERVAL, DEFAULT_PORT } from "../expeditor/service.ts";
 import { expeditorState } from "../expeditor/state.ts";
 import { expeditor } from "../expeditor/tick.ts";
@@ -22,16 +20,15 @@ import { runEach, unitFor } from "./service-unit.ts";
 const USAGE = `Usage: kitchen up [options]
 
 Installs this host's expeditor as a user service (systemd on Linux, launchd on macOS) and starts it.
-The expeditor serves the UI on its port, bound to loopback, and runs bd serve on the next port behind
-a token file it generates (docs/ui.md).
+The expeditor serves the UI on its port, bound to loopback, behind a token file it generates (docs/ui.md).
 
 Options:
   --interval <seconds>   Seconds between ticks (default: ${DEFAULT_INTERVAL})
-  --port <port>          The loopback port of the UI; bd serve takes the next one (default: ${DEFAULT_PORT});
-                         0 gives both an ephemeral port, for a check by hand
+  --port <port>          The loopback port of the UI (default: ${DEFAULT_PORT}); 0 gives an ephemeral port,
+                         for a check by hand
   --foreground           Run the expeditor in this process instead of installing the service
   --once                 With --foreground: one tick, then wait for the turns it started, then exit;
-                         no UI and no bd serve are started for it
+                         no UI is started for it
 `;
 
 export const up: Command = async (args, deps) => {
@@ -91,7 +88,7 @@ async function foreground(deps: CliDeps, config: HostConfig, interval: number, p
   try {
     servers = await serve(deps, config, log, port);
   } catch (error) {
-    // The port probe or a listen refused: logged, the state left stopped, and the exit is the service's to report.
+    // A listen refused (the port taken): logged, the state left stopped, and the exit is the service's to report.
     const failed = error instanceof Error ? error.message : String(error);
     log.write({ step: "serve", failed });
     state.stopped();
@@ -121,48 +118,16 @@ async function foreground(deps: CliDeps, config: HostConfig, interval: number, p
   }
 }
 
-/** Starts bd serve and the UI server, logs where they listen, and reports a bd serve that ends on its own. */
+/** Starts the UI server with a fresh token and logs where it listens. */
 async function serve(deps: CliDeps, config: HostConfig, log: Log, port: number): Promise<{ stop(): Promise<void> }> {
-  // bd serve needs a fixed port (an ephemeral one is only printed on its stdout): the one after the UI's,
-  // and a free one of this host's choosing when the UI takes an ephemeral port, so two runs by hand do not collide.
-  const api = startServe({ runner: deps.runner, env: deps.env, config }, port === 0 ? await freePort() : port + 1);
-  let stopped = false;
-  void api.done.then((result) => {
-    if (!stopped) log.write({ step: "serve", ended: `bd serve exited ${result.exitCode}`, stderr: result.stderr.trim() });
-  });
-  let ui: Awaited<ReturnType<typeof startUi>>;
-  try {
-    ui = await startUi({ uiDir: deps.program.uiDir, owner: config.owner, host: config.host, port, api: api.url });
-  } catch (error) {
-    // A listen refused (the UI port taken) ends the run: bd serve, already running, is stopped with it,
-    // since a child left behind would hold the API port and keep this process alive.
-    stopped = true;
-    api.stop();
-    await api.done;
-    throw error;
-  }
-  log.write({ step: "serve", ui: ui.url, api: api.url, token: api.tokenFile });
+  const ui = await startUi({ uiDir: deps.program.uiDir, config, runner: deps.runner, env: deps.env, tokenFile: serveTokenFile(deps.env), port });
+  log.write({ step: "serve", ui: ui.url, token: ui.tokenFile });
   return {
     stop: async () => {
-      stopped = true;
-      api.stop();
       await ui.close();
       log.write({ step: "serve", stopped: true });
     },
   };
-}
-
-/** A loopback port nothing listens on now: bound to 0 and released, for bd serve to take next. */
-function freePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const probe = net.createServer();
-    probe.once("error", reject);
-    probe.listen(0, "127.0.0.1", () => {
-      const address = probe.address();
-      const port = typeof address === "object" && address !== null ? address.port : 0;
-      probe.close(() => resolve(port));
-    });
-  });
 }
 
 function parseOptions(args: readonly string[]) {

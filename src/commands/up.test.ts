@@ -104,7 +104,6 @@ const QUIET_TICK: ScriptedAnswer[] = [
   { command: "bd", args: ["--actor", "sona/expeditor", "list", "--type", "gate"], stdout: "[]" },
   { command: "bd", args: ["--actor", "sona/expeditor", "reclaim", "--json"], stdout: '{"count":0,"reclaimed":null}' },
   { command: "bd", args: ["--actor", "sona/expeditor", "list", "--type", "epic"], stdout: "[]" },
-  { command: "bd", args: ["serve"] },
 ];
 
 test("kitchen up --foreground keeps the expeditor's state file current: written after every tick with the tick count and the instant, and marked stopped when the service is told to stop", async (t) => {
@@ -137,7 +136,7 @@ test("kitchen up --foreground keeps the expeditor's state file current: written 
   assert.deepEqual({ tick: afterOnce.tick, stopped: afterOnce.stopped }, { tick: 1, stopped: "2026-01-01T00:00:00.000Z" });
 });
 
-test("the running expeditor serves bd serve on loopback with a token file it owns, mode 0600, over the space connection, and the UI on its port; the stop that kitchen down sends ends both", async (t) => {
+test("the running expeditor serves the UI on loopback behind a token file it owns, mode 0600, and the stop that kitchen down sends closes it", async (t) => {
   const k = kitchen(t, QUIET_TICK);
   const tokenFile = path.join(k.home, ".local", "state", "kitchen", "serve.token");
   const logFile = path.join(k.home, ".local", "state", "kitchen", "expeditor.jsonl");
@@ -151,30 +150,21 @@ test("the running expeditor serves bd serve on loopback with a token file it own
     await new Promise((resolve) => setImmediate(resolve));
   }
   const served = servedLine() as Record<string, unknown>;
-  assert.match(served.ui as string, /^http:\/\/127\.0\.0\.1:\d+$/, "the UI is bound to loopback");
-  assert.match(served.api as string, /^http:\/\/127\.0\.0\.1:\d+$/, "bd serve too takes a port of this host's choosing under --port 0, so two runs by hand do not collide");
-  assert.notEqual(served.api, "http://127.0.0.1:4818");
-  const apiPort = (served.api as string).split(":").at(-1);
+  assert.match(served.ui as string, /^http:\/\/127\.0\.0\.1:\d+$/, "the UI is bound to loopback, on a port of this host's choosing under --port 0");
   assert.equal(served.token, tokenFile);
   assert.deepEqual(await (await fetch(`${served.ui}/me`)).json(), { owner: "sona", host: "sona-laptop" }, "the UI server answers while the expeditor runs");
-
-  const serve = k.runner.calls.find((c) => c.argv[0] === "bd" && c.argv[1] === "serve");
-  assert.ok(serve, "bd serve was issued");
-  assert.deepEqual(serve.argv, ["bd", "serve", "--addr", `127.0.0.1:${apiPort}`, "--auth-token-file", tokenFile]);
-  assert.deepEqual({ cwd: serve.cwd, env: serve.env }, k.connection, "bd serve runs over the space connection, like every bd call");
-  assert.ok(serve.signal instanceof AbortSignal && !serve.signal.aborted, "bd serve runs until the expeditor is told to stop");
   assert.equal(fs.statSync(tokenFile).mode & 0o777, 0o600);
-  assert.match(fs.readFileSync(tokenFile, "utf8"), /^[0-9a-f]{64}\n$/, "one token per line, as bd serve reads it");
+  assert.match(fs.readFileSync(tokenFile, "utf8"), /^[0-9a-f]{64}\n$/, "one token per line");
+  assert.equal((await fetch(`${served.ui}/v0/beads/issues`)).status, 401, "the API needs the token");
+  assert.ok(!k.runner.calls.some((c) => c.argv[0] === "bd" && c.argv[1] === "serve"), "no bd serve: the API is answered by bd calls over the space connection");
 
   process.emit("SIGTERM");
   assert.equal(await running, 0, k.err.join(""));
-
-  assert.ok(serve.signal.aborted, "bd serve is stopped with the expeditor");
   await assert.rejects(fetch(`${served.ui}/me`), "the UI server is closed once the expeditor has exited");
   assert.deepEqual(log().at(-1), { at: log().at(-1)?.at, step: "serve", stopped: true });
 });
 
-test("a UI port something else listens on ends kitchen up --foreground with the refusal, and the bd serve already started is stopped with it: no child is left holding the API port", async (t) => {
+test("a UI port something else listens on ends kitchen up --foreground with the refusal, logged, and nothing is served", async (t) => {
   const k = kitchen(t, QUIET_TICK);
   const logFile = path.join(k.home, ".local", "state", "kitchen", "expeditor.jsonl");
   const log = (): Record<string, unknown>[] =>
@@ -188,18 +178,14 @@ test("a UI port something else listens on ends kitchen up --foreground with the 
   assert.equal(await k.run("up", "--foreground", "--port", String(port)), 1);
 
   assert.match(k.err.at(-1) ?? "", /^kitchen up: could not serve: listen EADDRINUSE/);
-  const serve = k.runner.calls.find((c) => c.argv[0] === "bd" && c.argv[1] === "serve");
-  assert.ok(serve, "bd serve was started before the UI listened");
-  assert.ok(serve.signal instanceof AbortSignal && serve.signal.aborted, "bd serve is stopped when the UI cannot listen");
   const failed = log().find((line) => line.step === "serve" && line.failed);
   assert.match(failed?.failed as string, /EADDRINUSE/);
   assert.ok(!log().some((line) => line.step === "serve" && typeof line.ui === "string"), "nothing is logged as served");
 });
 
-test("kitchen up --foreground --once runs one tick and serves nothing: no bd serve, no UI port", async (t) => {
+test("kitchen up --foreground --once runs one tick and serves nothing: no UI port, no token", async (t) => {
   const k = kitchen(t, QUIET_TICK);
   assert.equal(await k.run("up", "--foreground", "--once"), 0, k.err.join(""));
-  assert.ok(!k.runner.calls.some((c) => c.argv[0] === "bd" && c.argv[1] === "serve"));
   assert.ok(!fs.existsSync(path.join(k.home, ".local", "state", "kitchen", "serve.token")));
 });
 

@@ -13,7 +13,7 @@ import path from "node:path";
 import { parseActor } from "../actor.ts";
 import type { HostConfig } from "../config.ts";
 import type { CommandRunner } from "../runner.ts";
-import { openSpace, RefusedError, SpaceError } from "../space.ts";
+import { JournalTruncatedError, openSpace, RefusedError, SpaceError } from "../space.ts";
 import type { Bead, BeadFilter, JournalEvent, Space } from "../space.ts";
 
 /** The loopback address the UI binds. */
@@ -131,9 +131,10 @@ function reply(response: http.ServerResponse, status: number, type: string, body
   response.end(body);
 }
 
+const TITLES: Record<number, string> = { 400: "Bad Request", 401: "Unauthorized", 403: "Forbidden", 404: "Not Found", 409: "Conflict", 500: "Internal Server Error" };
+
 function problem(response: http.ServerResponse, status: number, code: string, detail: string): void {
-  const titles: Record<number, string> = { 400: "Bad Request", 401: "Unauthorized", 403: "Forbidden", 404: "Not Found", 409: "Conflict", 500: "Internal Server Error" };
-  const body: Problem = { code, detail, status, title: titles[status] ?? "Error" };
+  const body: Problem = { code, detail, status, title: TITLES[status] ?? "Error" };
   reply(response, status, "application/json", JSON.stringify(body));
 }
 
@@ -153,7 +154,22 @@ function readBody(request: http.IncomingMessage): Promise<string> {
   });
 }
 
-/** What `bd ready` and `bd list` narrow by, read from the query string as bd serve names the parameters. */
+/** A refusal the route answers as a 400, raised while reading the request. */
+class BadRequest extends Error {}
+
+/**
+ * A query parameter that is a whole number when given: the number, undefined when absent or empty, a
+ * BadRequest otherwise. One rule for `limit` on every route and for `since` on the journal.
+ */
+function wholeNumber(url: URL, name: string): number | undefined {
+  const value = url.searchParams.get(name);
+  if (value === null || value === "") return undefined;
+  const number = Number(value);
+  if (!Number.isInteger(number) || number < 0) throw new BadRequest(`\`${name}\` must be a whole number, got ${value}`);
+  return number;
+}
+
+/** What `bd ready` and `bd list` narrow by, read from the query string as bd serve names the parameters; `limit=0` asks for all. */
 function filterOf(url: URL): BeadFilter {
   const filter: BeadFilter = {};
   const one = (name: string): string | undefined => {
@@ -165,29 +181,89 @@ function filterOf(url: URL): BeadFilter {
   const assignee = one("assignee");
   const parent = one("parent");
   const labels = url.searchParams.getAll("label").filter((label) => label !== "");
-  const limit = one("limit");
+  const limit = wholeNumber(url, "limit");
   if (type !== undefined) filter.type = type;
   if (status !== undefined) filter.status = status;
   if (assignee !== undefined) filter.assignee = assignee;
   if (parent !== undefined) filter.parent = parent;
   if (labels.length) filter.labels = labels;
-  if (limit !== undefined && Number.isInteger(Number(limit)) && Number(limit) > 0) filter.limit = Number(limit);
+  if (limit !== undefined && limit > 0) filter.limit = limit;
   return filter;
 }
 
 type Route = (url: URL, request: http.IncomingMessage, response: http.ServerResponse) => Promise<void>;
 
+/** One route: the method, the path pattern, and the handler given the pattern's captures. */
+type Handler = (url: URL, request: http.IncomingMessage, response: http.ServerResponse, captures: string[]) => Promise<void>;
+
+const ID = "([^/:]+)";
+
 /**
  * The API: every route reads or writes the space through one bd call under an actor. Reads run as the
  * owner, the person the page serves; a close runs as the actor the body names, the human's name the
- * view sends, and the space wrapper's cooperative rules apply to it as to any other write.
+ * view sends, and the space wrapper's cooperative rules apply to it as to any other write. The table
+ * is the one `docs/ui.md` lists.
  */
 function apiRoutes(spec: UiSpec): Route {
   const space = (actor: string): Space => openSpace({ runner: spec.runner, env: spec.env, config: spec.config, actor: parseActor(actor) });
   const reads = space(spec.config.owner);
   const journal = journalReader(reads);
-  const ISSUE = /^\/v0\/beads\/issues\/([^/:]+)$/;
-  const CLOSE = /^\/v0\/beads\/issues\/([^/:]+):close$/;
+
+  /** The bead, or a 404 with bd's words when bd does not find it, on a read and on a close alike. */
+  const showOr404 = async (by: Space, id: string, response: http.ServerResponse): Promise<Bead | undefined> => {
+    try {
+      return await by.show(id);
+    } catch (error) {
+      if (!(error instanceof SpaceError)) throw error;
+      problem(response, 404, "not_found", `no bead ${id}: ${error.result.stderr.trim() || error.result.stdout.trim()}`);
+      return undefined;
+    }
+  };
+
+  const list: Handler = async (url, _request, response) => {
+    const items = await reads.list(filterOf(url));
+    reply(response, 200, "application/json", JSON.stringify({ items }));
+  };
+  const ready: Handler = async (url, _request, response) => {
+    const items = await reads.ready(filterOf(url));
+    reply(response, 200, "application/json", JSON.stringify({ items }));
+  };
+  const show: Handler = async (_url, _request, response, [id = ""]) => {
+    const bead = await showOr404(reads, id, response);
+    if (bead) reply(response, 200, "application/json", JSON.stringify(bead));
+  };
+  const events: Handler = async (url, _request, response) => {
+    const since = wholeNumber(url, "since") ?? 0;
+    const limit = wholeNumber(url, "limit") ?? 0;
+    reply(response, 200, "application/json", JSON.stringify(await journal(since, limit)));
+  };
+  const close: Handler = async (_url, request, response, [id = ""]) => {
+    let body: { actor?: unknown; reason?: unknown };
+    try {
+      body = JSON.parse((await readBody(request)) || "{}") as { actor?: unknown; reason?: unknown };
+    } catch (error) {
+      throw new BadRequest(`the body is not JSON: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    if (typeof body.actor !== "string" || body.actor.trim() === "") throw new BadRequest("`actor` is required");
+    if (typeof body.reason !== "string" || body.reason.trim() === "") throw new BadRequest("`reason` is required");
+    const writer = space(body.actor);
+    const bead = await showOr404(writer, id, response);
+    if (!bead) return;
+    if (bead.status === "closed") {
+      problem(response, 409, "conflict", `${id} is already closed`);
+      return;
+    }
+    await writer.close(bead, body.reason);
+    reply(response, 200, "application/json", JSON.stringify({ id, status: "closed" }));
+  };
+
+  const routes: readonly (readonly [method: string, pattern: RegExp, handler: Handler])[] = [
+    ["GET", /^\/v0\/beads\/issues$/, list],
+    ["GET", /^\/v0\/beads\/ready$/, ready],
+    ["GET", new RegExp(`^/v0/beads/issues/${ID}$`), show],
+    ["GET", /^\/v0\/beads\/events$/, events],
+    ["POST", new RegExp(`^/v0/beads/issues/${ID}:close$`), close],
+  ];
 
   return async (url, request, response) => {
     const header = request.headers.authorization ?? "";
@@ -197,63 +273,17 @@ function apiRoutes(spec: UiSpec): Route {
       return;
     }
     try {
-      if (request.method === "GET" && url.pathname === "/v0/beads/issues") {
-        const items = await reads.list(filterOf(url));
-        reply(response, 200, "application/json", JSON.stringify({ items }));
-      } else if (request.method === "GET" && url.pathname === "/v0/beads/ready") {
-        const items = await reads.ready(filterOf(url));
-        reply(response, 200, "application/json", JSON.stringify({ items }));
-      } else if (request.method === "GET" && ISSUE.test(url.pathname)) {
-        const id = ISSUE.exec(url.pathname)?.[1] ?? "";
-        let bead: Bead;
-        try {
-          bead = await reads.show(id);
-        } catch (error) {
-          if (error instanceof SpaceError) {
-            problem(response, 404, "not_found", `no bead ${id}: ${error.result.stderr.trim() || error.result.stdout.trim()}`);
-            return;
-          }
-          throw error;
-        }
-        reply(response, 200, "application/json", JSON.stringify(bead));
-      } else if (request.method === "GET" && url.pathname === "/v0/beads/events") {
-        const since = Number(url.searchParams.get("since") ?? "0");
-        const limit = Number(url.searchParams.get("limit") ?? "0");
-        if (!Number.isInteger(since) || since < 0 || !Number.isInteger(limit) || limit < 0) {
-          problem(response, 400, "invalid_argument", "`since` and `limit` must be whole numbers");
+      for (const [method, pattern, handler] of routes) {
+        const match = request.method === method ? pattern.exec(url.pathname) : null;
+        if (match) {
+          await handler(url, request, response, match.slice(1));
           return;
         }
-        reply(response, 200, "application/json", JSON.stringify(await journal(since, limit)));
-      } else if (request.method === "POST" && CLOSE.test(url.pathname)) {
-        const id = CLOSE.exec(url.pathname)?.[1] ?? "";
-        let body: { actor?: unknown; reason?: unknown };
-        try {
-          body = JSON.parse((await readBody(request)) || "{}") as { actor?: unknown; reason?: unknown };
-        } catch (error) {
-          problem(response, 400, "invalid_argument", `the body is not JSON: ${error instanceof Error ? error.message : String(error)}`);
-          return;
-        }
-        if (typeof body.actor !== "string" || body.actor.trim() === "") {
-          problem(response, 400, "invalid_argument", "`actor` is required");
-          return;
-        }
-        if (typeof body.reason !== "string" || body.reason.trim() === "") {
-          problem(response, 400, "invalid_argument", "`reason` is required");
-          return;
-        }
-        const writer = space(body.actor);
-        const bead = await writer.show(id);
-        if (bead.status === "closed") {
-          problem(response, 409, "conflict", `${id} is already closed`);
-          return;
-        }
-        await writer.close(bead, body.reason);
-        reply(response, 200, "application/json", JSON.stringify({ id, status: "closed" }));
-      } else {
-        problem(response, 404, "not_found", `no route ${request.method} ${url.pathname}`);
       }
+      problem(response, 404, "not_found", `no route ${request.method} ${url.pathname}`);
     } catch (error) {
-      if (error instanceof RefusedError) problem(response, 403, "refused", error.message);
+      if (error instanceof BadRequest) problem(response, 400, "invalid_argument", error.message);
+      else if (error instanceof RefusedError) problem(response, 403, "refused", error.message);
       else if (error instanceof SpaceError) problem(response, 409, "bd_refused", error.result.stderr.trim() || error.message);
       else problem(response, 500, "internal", error instanceof Error ? error.message : String(error));
     }
@@ -264,13 +294,23 @@ function apiRoutes(spec: UiSpec): Route {
  * The journal route as the Activity view reads it: the head, the highest sequence number so far, and
  * the records after `since`, at most `limit` of them. bd tails the journal forward only, so the head is
  * learnt by reading what came after the last head seen: the whole journal on the first request of this
- * process, the new records on every later one.
+ * process, the new records on every later one. A read below the retention floor, which bd fails rather
+ * than skipping ahead, takes the head from bd's answer and resumes from the oldest retained record.
  */
 function journalReader(space: Space): (since: number, limit: number) => Promise<{ head: number; records: JournalEvent[] }> {
   let head = 0;
+  const after = async (since: number, limit?: number): Promise<JournalEvent[]> => {
+    try {
+      return await space.events(since, limit);
+    } catch (error) {
+      if (!(error instanceof JournalTruncatedError)) throw error;
+      head = Math.max(head, error.head);
+      return space.events(error.floor - 1, limit);
+    }
+  };
   return async (since, limit) => {
-    for (const record of await space.events(head)) head = Math.max(head, record.seq);
-    const records = limit === 0 ? await space.events(since) : await space.events(since, limit);
+    for (const record of await after(head)) head = Math.max(head, record.seq);
+    const records = limit === 0 ? await after(since) : await after(since, limit);
     return { head, records };
   };
 }

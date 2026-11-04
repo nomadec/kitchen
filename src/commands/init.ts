@@ -47,8 +47,8 @@ export const init: Command = async (args, deps) => {
   // server password from BEADS_DOLT_PASSWORD only: the init call carries the section's password in
   // its environment and nothing else does. A file or section that is missing is refused here.
   let password: string | undefined;
-  if (server && config.credential !== undefined) {
-    const read = credentialPassword(config.credential, `${server.host}:${server.port}`);
+  if (config.server) {
+    const read = credentialPassword(config.credential, `${config.server.host}:${config.server.port}`);
     if ("error" in read) {
       deps.stderr(`kitchen init: ${read.error}\n`);
       return 1;
@@ -102,50 +102,55 @@ export const init: Command = async (args, deps) => {
   return 0;
 };
 
+/** The options as parseArgs reads them, so their types follow from the table. */
+function parseValues(args: readonly string[]) {
+  return parseArgs({
+    args: [...args],
+    options: {
+      server: { type: "string" },
+      local: { type: "boolean" },
+      owner: { type: "string" },
+      database: { type: "string" },
+      user: { type: "string" },
+      credential: { type: "string" },
+      host: { type: "string" },
+    },
+    strict: true,
+  }).values;
+}
+
 function parseOptions(
   args: readonly string[],
   hostname: string,
   defaultCredential: string,
 ): { config: HostConfig } | { error: string } {
-  let values: Record<string, string | boolean | undefined>;
+  let values: ReturnType<typeof parseValues>;
   try {
-    ({ values } = parseArgs({
-      args: [...args],
-      options: {
-        server: { type: "string" },
-        local: { type: "boolean" },
-        owner: { type: "string" },
-        database: { type: "string" },
-        user: { type: "string" },
-        credential: { type: "string" },
-        host: { type: "string" },
-      },
-      strict: true,
-    }));
+    values = parseValues(args);
   } catch (error) {
     return { error: error instanceof Error ? error.message : String(error) };
   }
-  const owner = typeof values.owner === "string" ? values.owner : undefined;
-  const host = typeof values.host === "string" ? values.host : hostname;
+  const owner = values.owner;
+  const host = values.host ?? hostname;
   if (!owner) return { error: "--owner <name> is required" };
   if (values.local) {
-    const serverOnly = ["server", "database", "user", "credential"].filter((name) => values[name] !== undefined);
+    const serverOnly = (["server", "database", "user", "credential"] as const).filter((name) => values[name] !== undefined);
     if (serverOnly.length) return { error: `--local takes no ${serverOnly.map((name) => `--${name}`).join(", ")}: a local space has no server` };
     return { config: { owner, host } };
   }
-  if (typeof values.server !== "string") return { error: "--server <host:port> or --local is required" };
+  if (values.server === undefined) return { error: "--server <host:port> or --local is required" };
   const address = parseAddress(values.server);
   if (!address) return { error: `--server must be host:port, got ${values.server}` };
 
   const server: SpaceServer = {
     ...address,
-    user: typeof values.user === "string" ? values.user : owner,
-    database: typeof values.database === "string" ? values.database : "kitchen",
+    user: values.user ?? owner,
+    database: values.database ?? "kitchen",
   };
   return {
     config: {
       server,
-      credential: typeof values.credential === "string" ? values.credential : defaultCredential,
+      credential: values.credential ?? defaultCredential,
       owner,
       host,
     },

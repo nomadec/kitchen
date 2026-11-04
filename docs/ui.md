@@ -22,11 +22,11 @@ The views speak the shape of bd serve's routes (`/v0/beads/...`), and the UI ser
 | `GET /v0/beads/issues?type=&status=&label=&assignee=&parent=&limit=` | `bd list` with the same narrowing, as the owner | `{"items": [...]}` |
 | `GET /v0/beads/ready?assignee=&limit=` | `bd ready` | `{"items": [...]}` |
 | `GET /v0/beads/issues/<id>` | `bd show` | the bead; 404 with bd's words when there is none |
-| `GET /v0/beads/events?since=&limit=` | `bd events tail --since --limit` | `{"head": <seq>, "records": [...]}` |
-| `POST /v0/beads/issues/<id>:close` `{"actor","reason"}` | `bd show`, then `bd close --reason` under the actor named | 200; 400 without an actor or a word, 409 when already closed, 403 when the space wrapper refuses the actor |
+| `GET /v0/beads/events?since=&limit=` | `bd events tail --since --limit --json` | `{"head": <seq>, "records": [...]}` |
+| `POST /v0/beads/issues/<id>:close` `{"actor","reason"}` | `bd show`, then `bd close --reason` under the actor named | 200; 400 without an actor or a word, 404 with bd's words when there is no such bead, 409 when already closed, 403 when the space wrapper refuses the actor |
 | `GET /healthz` | none | 200, no token needed |
 
-`limit=0` asks for everything, as bd does. The journal's head, the highest sequence number so far, is learnt by tailing forward from the last head this process saw: the whole journal on the first request after a start, the new records after that. A refusal is `{"code","detail","status","title"}`, the shape the views read.
+`limit=0` asks for everything, as bd does; a `limit` or `since` that is not a whole number is a 400 on every route, before any `bd` call. The journal's head, the highest sequence number so far, is learnt by tailing forward from the last head this process saw: the whole journal on the first request after a start, the new records after that. bd retains a bounded window of the journal and fails a read below it rather than skipping ahead, so a read that lands below the floor takes the head from bd's answer and is retried from the oldest retained record, with the gap. Any other failure of a `bd` call is a 409 `bd_refused` carrying bd's stderr. A refusal is `{"code","detail","status","title"}`, the shape the views read.
 
 Reads run as the owner, the person the page serves. A close runs as the actor the body names, the owner's name the view sends from `/me`, and goes through the space wrapper like any write, so a station or expeditor actor named there is refused (403) before any `bd close`, the same cooperative rule the CLI applies (`docs/trust-model.md`).
 
@@ -72,7 +72,7 @@ There is no start button in v1 (spec: out of scope): the turn is attended, so it
 
 ## The Activity view
 
-The latest fifty records of the events journal, newest first, each with when, who (the actor: you, a station or the expeditor), what (`create`, `update`, `close`, `dep_add`, as the journal names it), the bead with its title, and a detail: the close reason, the dependency added, or the bead's status and station. The journal route reads forward from a sequence number (`GET /v0/beads/events?since=<seq>&limit=<n>`), so the view asks for the head first and then for the fifty records behind it. `kitchen init` turns the journal on for every space; a space where it was turned off since shows nothing new.
+The latest fifty records of the events journal, newest first, each with when, who (the actor: you, a station or the expeditor), what (`create`, `update`, `close`, `dep_add`, as the journal names it), the bead with its title, and a detail: the close reason, the dependency added, or the bead's status and station. The journal route reads forward from a sequence number (`GET /v0/beads/events?since=<seq>&limit=<n>`), so the view asks for the head first and then for the fifty records behind it. `kitchen init` turns the journal on for every space. On a space where it was turned off since, `bd events tail` fails, and the view shows that refusal with bd's words (409 `bd_refused`); a journal pruned below the fifty asked for shows what bd still retains.
 
 The UI is tested at two seams: each view's data layer against a scripted `fetch` (`ui/passes.test.ts`, `ui/orders.test.ts`, `ui/stations.test.ts`, `ui/activity.test.ts`, all through `ui/scripted-fetch.ts`) and the server at its HTTP port against the fake command runner standing in for `bd` (`src/expeditor/ui.test.ts`). The page itself, and the navigation between the views, is exercised by the hand-run smoke.
 

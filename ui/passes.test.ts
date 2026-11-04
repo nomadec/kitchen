@@ -82,7 +82,7 @@ test("a station actor, and the expeditor, may not close a pass through the UI: r
   }
 });
 
-test("an empty word is refused before any request; a refused token and a the API refusal are reported with their detail", async () => {
+test("an empty word is refused before any request; a refused token and a refusal of the API are reported with their detail", async () => {
   const empty = scriptedFetch([]);
   await assert.rejects(() => passView({ fetch: empty.fetch, token: "tok123", actor: "sona" }).answer({ id: "kitchen-33" }, "   "), /the word is empty/);
   assert.equal(empty.requests.length, 0);

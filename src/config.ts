@@ -10,16 +10,26 @@ export interface SpaceServer {
   database: string;
 }
 
-export interface HostConfig {
-  /** The Dolt SQL server the space lives on; absent for a local space, an embedded beads workspace on this host alone. */
-  server?: SpaceServer;
-  /** Credential reference: the beads credentials file whose `[host:port]` section holds the password; absent for a local space. */
-  credential?: string;
+/** Where the space is: a shared one on a Dolt SQL server with the credential that reaches it, or a local one, with neither. */
+export type SpaceLocation =
+  | {
+      /** The Dolt SQL server the shared space lives on. */
+      server: SpaceServer;
+      /** Credential reference: the beads credentials file whose `[host:port]` section holds the password. */
+      credential: string;
+    }
+  | {
+      /** A local space, an embedded beads workspace on this host alone: no server and no credential. */
+      server?: undefined;
+      credential?: undefined;
+    };
+
+export type HostConfig = SpaceLocation & {
   /** The person this host's stations belong to; the bare human actor. */
   owner: string;
   /** The name stations registered on this host carry in their `host:` label. */
   host: string;
-}
+};
 
 type Env = Record<string, string | undefined>;
 

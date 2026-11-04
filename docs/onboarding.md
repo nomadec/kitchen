@@ -1,12 +1,12 @@
 # Onboarding: a person, then a host
 
-Kitchen has one team space: a `kitchen` database on a Dolt SQL server on rbn3, reached over Tailscale. Every person has one SQL credential, used by that person and by every station they own. Every host runs one expeditor and the stations registered on it. This doc walks both through to a first `kitchen status`.
+The team's shared space is a `kitchen` database on a Dolt SQL server on rbn3, reached over Tailscale. Every person has one SQL credential, used by that person and by every station they own. Every host runs one expeditor and the stations registered on it. This doc walks both through to a first `kitchen status`.
 
 The space starts empty. Nothing is imported from Umka.
 
 ## One person, one machine: a local space
 
-A person working alone needs no server and no credential. `kitchen init --local` makes a space of this host's own, an embedded beads workspace under `~/.config/kitchen/space`, and every command and the UI work against it as against the team space; only a second host cannot join it. The whole setup is four commands on a host with Node 24 and bd 1.3.1 on the path (step 2 below has the bd install):
+A person working alone needs no server and no credential. `kitchen init --local` makes a space of this host's own, an embedded beads workspace under `~/.config/kitchen/space`, and every command and the UI work against it as against the shared space; only a second host cannot join it. The whole setup is four commands on a host with Node 24 and bd 1.3.1 on the path (step 2 below has the bd install):
 
 ```sh
 npm install -g @nomadec/kitchen
@@ -16,7 +16,7 @@ kitchen station add <station.json> --repo <slug>=<local path> --cap 1 --timeout 
 kitchen up
 ```
 
-Then `kitchen order add` and the UI at `http://127.0.0.1:4817` as in step 4 under **Onboarding a host**. Moving to the team space later is `kitchen init --server ...` on the same host, which re-points the host at the server; the local space's beads stay where they are and are not carried over.
+Then `kitchen order add` and the UI at `http://127.0.0.1:4817` as in step 4 under **Onboarding a host**. Moving to the shared space later: remove the local space first (`rm -r ~/.config/kitchen/space`), then `kitchen init --server ...` on the same host, which creates the workspace against the server. The local space's beads are not carried over, so nothing is lost in the removal that a re-init would have kept.
 
 ## The server
 

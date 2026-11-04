@@ -260,7 +260,7 @@ test("the turn's result line, the last line of its output, is appended as a comm
     [...EXPEDITOR, "comments", "add", "kitchen-21", "kitchen-21 closed: https://github.com/nomadec/kitchen/pull/9", "--json"],
     ["--actor", "sona/oven", "update", "kitchen-20", "--status", "open", "--assignee", "", "--json"],
   ]);
-  // The serve lines (where the UI and bd serve listen) belong to the process, not to a tick.
+  // The serve lines (where the UI listens) belong to the process, not to a tick.
   const tickLines = k.log().filter((line) => "tick" in line);
   const steps = tickLines.map((line) => line.step);
   const firstOf = (step: string) => steps.indexOf(step);

@@ -97,6 +97,13 @@ test("the issues and ready routes answer bd list and bd ready as the owner over 
   const children = await fetch(`${server.url}/v0/beads/issues?parent=kitchen-1&limit=0`, { headers: auth });
   assert.equal(children.status, 200);
   assert.deepEqual(runner.calls[3]?.argv, ["bd", "--actor", "sona", "list", "--parent", "kitchen-1", "--limit", "0", "--json"]);
+
+  for (const bad of ["limit=-1", "limit=x", "limit=1.5"]) {
+    const refused = await fetch(`${server.url}/v0/beads/issues?${bad}`, { headers: auth });
+    assert.equal(refused.status, 400, bad);
+    assert.match(((await refused.json()) as { detail: string }).detail, /`limit` must be a whole number/);
+  }
+  assert.equal(runner.calls.length, 4, "a limit that is not a whole number is refused before any bd call");
 });
 
 test("one issue is bd show; a bead bd does not find is a 404 with bd's words, and a route that is not there a 404 too", async (t) => {
@@ -119,12 +126,13 @@ test("one issue is bd show; a bead bd does not find is a 404 with bd's words, an
   assert.equal((await fetch(`${server.url}/v0/beads/issues`, { method: "DELETE", headers: auth })).status, 404);
 });
 
-test("a close posts bd close under the actor the body names with the word as the reason; a missing actor or word is a 400, a closed pass a 409, and a station actor is refused by the space wrapper as a 403", async (t) => {
+test("a close posts bd close under the actor the body names with the word as the reason; a missing actor or word is a 400, a pass bd does not find a 404, a closed pass a 409, and a station actor is refused by the space wrapper as a 403", async (t) => {
   const pass = { id: "kitchen-33", title: "approve: smoke", status: "open", issue_type: "gate", await_type: "human" };
   const { server, runner, auth, connection } = await ui(t, [
     { command: "bd", args: ["--actor", "sona", "show", "kitchen-33"], stdout: JSON.stringify([pass]) },
     { command: "bd", args: ["--actor", "sona", "close", "kitchen-33"], stdout: "[]" },
     { command: "bd", args: ["--actor", "sona", "show", "kitchen-34"], stdout: JSON.stringify([{ ...pass, id: "kitchen-34", status: "closed" }]) },
+    { command: "bd", args: ["--actor", "sona", "show", "kitchen-99"], exitCode: 1, stderr: "Error: no issues found matching the provided IDs\n" },
     { command: "bd", args: ["--actor", "sona/oven", "show", "kitchen-33"], stdout: JSON.stringify([pass]) },
   ]);
   const post = (path: string, body: unknown, headers = auth) => fetch(`${server.url}${path}`, { method: "POST", headers: { ...headers, "content-type": "application/json" }, body: JSON.stringify(body) });
@@ -143,6 +151,10 @@ test("a close posts bd close under the actor the body names with the word as the
   assert.equal((await post("/v0/beads/issues/kitchen-33:close", { actor: "sona", reason: " " })).status, 400);
   assert.equal((await fetch(`${server.url}/v0/beads/issues/kitchen-33:close`, { method: "POST", headers: auth, body: "{not json" })).status, 400);
 
+  const missing = await post("/v0/beads/issues/kitchen-99:close", { actor: "sona", reason: "ship" });
+  assert.equal(missing.status, 404, "the same 404 the GET route answers");
+  assert.match(((await missing.json()) as { detail: string }).detail, /no bead kitchen-99: Error: no issues found/);
+
   const again = await post("/v0/beads/issues/kitchen-34:close", { actor: "sona", reason: "ship" });
   assert.equal(again.status, 409);
   assert.match(((await again.json()) as { detail: string }).detail, /kitchen-34 is already closed/);
@@ -150,7 +162,7 @@ test("a close posts bd close under the actor the body names with the word as the
   const station = await post("/v0/beads/issues/kitchen-33:close", { actor: "sona/oven", reason: "ship" });
   assert.equal(station.status, 403);
   assert.match(((await station.json()) as { detail: string }).detail, /sona\/oven may not close the pass kitchen-33/);
-  assert.deepEqual(runner.calls.slice(2).map((c) => c.argv[3]), ["show", "show"], "the conflict and the refusal read the bead and issued no bd close");
+  assert.deepEqual(runner.calls.slice(2).map((c) => c.argv[3]), ["show", "show", "show"], "the miss, the conflict and the refusal read the bead and issued no bd close");
 });
 
 test("the events route answers the journal's head and the records after since, the head learnt from the records read so far", async (t) => {
@@ -165,13 +177,40 @@ test("the events route answers the journal's head and the records after since, t
   const head = await fetch(`${server.url}/v0/beads/events?since=0&limit=1`, { headers: auth });
   assert.equal(head.status, 200);
   assert.deepEqual(await head.json(), { head: 3, records: [JSON.parse(record(1))] });
-  assert.deepEqual(runner.calls.map((c) => c.argv.slice(3)), [["events", "tail", "--since", "0"], ["events", "tail", "--since", "0", "--limit", "1"]], "the whole journal once for the head, then the window asked for");
+  assert.deepEqual(runner.calls.map((c) => c.argv.slice(3)), [["events", "tail", "--since", "0", "--json"], ["events", "tail", "--since", "0", "--limit", "1", "--json"]], "the whole journal once for the head, then the window asked for");
 
   const window = await fetch(`${server.url}/v0/beads/events?since=1&limit=2`, { headers: auth });
   assert.deepEqual(await window.json(), { head: 3, records: [JSON.parse(record(2)), JSON.parse(record(3))] });
-  assert.deepEqual(runner.calls[2]?.argv.slice(3), ["events", "tail", "--since", "3"], "later requests read only what came after the head seen");
+  assert.deepEqual(runner.calls[2]?.argv.slice(3), ["events", "tail", "--since", "3", "--json"], "later requests read only what came after the head seen");
 
   assert.equal((await fetch(`${server.url}/v0/beads/events?since=x`, { headers: auth })).status, 400);
+  assert.equal((await fetch(`${server.url}/v0/beads/events?limit=-1`, { headers: auth })).status, 400);
+});
+
+test("a journal pruned below the reader's checkpoint is resumed from bd's floor, with the head bd names, on the first request and on the window", async (t) => {
+  const record = (seq: number) => JSON.stringify({ seq, ts: "2026-01-01T00:00:00Z", op: "create", issue_id: `kitchen-${seq}`, actor: "sona", issue: { title: `bead ${seq}` } });
+  const truncated = (since: number) => JSON.stringify({ code: "events_journal_truncated", error: `checkpoint ${since} is below the retained window [3..5]`, floor: 3, head: 5, since });
+  const { server, runner, auth } = await ui(t, [
+    { command: "bd", args: ["--actor", "sona", "events", "tail", "--since", "0", "--limit", "2"], exitCode: 1, stdout: truncated(0), once: true },
+    { command: "bd", args: ["--actor", "sona", "events", "tail", "--since", "0"], exitCode: 1, stdout: truncated(0), once: true },
+    { command: "bd", args: ["--actor", "sona", "events", "tail", "--since", "2", "--limit", "2"], stdout: `${record(3)}\n${record(4)}\n` },
+    { command: "bd", args: ["--actor", "sona", "events", "tail", "--since", "2"], stdout: `${record(3)}\n${record(4)}\n${record(5)}\n` },
+    { command: "bd", args: ["--actor", "sona", "events", "tail", "--since", "5"], stdout: "" },
+    { command: "bd", args: ["--actor", "sona", "events", "tail", "--since", "9"], exitCode: 1, stderr: "Error: events journal is not enabled" },
+  ]);
+
+  const first = await fetch(`${server.url}/v0/beads/events?since=0&limit=2`, { headers: auth });
+  assert.equal(first.status, 200);
+  assert.deepEqual(await first.json(), { head: 5, records: [JSON.parse(record(3)), JSON.parse(record(4))] });
+  assert.deepEqual(runner.calls.map((c) => c.argv.slice(5)), [["--since", "0", "--json"], ["--since", "2", "--json"], ["--since", "0", "--limit", "2", "--json"], ["--since", "2", "--limit", "2", "--json"]], "each read below the floor is retried from floor - 1");
+
+  const later = await fetch(`${server.url}/v0/beads/events?since=5&limit=0`, { headers: auth });
+  assert.deepEqual(await later.json(), { head: 5, records: [] });
+  assert.deepEqual(runner.calls[4]?.argv.slice(5), ["--since", "5", "--json"], "the head read resumes from the head bd named");
+
+  const off = await fetch(`${server.url}/v0/beads/events?since=9&limit=0`, { headers: auth });
+  assert.equal(off.status, 409);
+  assert.deepEqual(await off.json(), { code: "bd_refused", detail: "Error: events journal is not enabled", status: 409, title: "Conflict" }, "any other failure of the read is bd's refusal, with bd's words");
 });
 
 test("a host with a local space serves the same API with no credential in any bd call's environment", async (t) => {

@@ -1,20 +1,34 @@
-# The UI: served by your expeditor, talking to `bd serve` with a token
+# The UI: served by your expeditor, with a token
 
-The UI is a static single-page app your own host's expeditor serves (story 69, ADR 0003). It reads and writes the space through `bd serve`, the beads HTTP API, with a bearer token; it never holds the SQL credential. It has four views, each a link a phone can bookmark: **Pass** (`#pass`, the page's default), every open pass with its order, its brief and an answer box, so a decision is one short exchange; **Orders** (`#orders`), where everything stands; **Stations** (`#stations`), what your agents are doing and what waits on you; **Activity** (`#activity`), what changed while you were away. Only Pass writes.
+The UI is a static single-page app your own host's expeditor serves (story 69, ADR 0003). It reads and writes the space through an API the same process answers, with a bearer token; it never holds the SQL credential. It has four views, each a link a phone can bookmark: **Pass** (`#pass`, the page's default), every open pass with its order, its brief and an answer box, so a decision is one short exchange; **Orders** (`#orders`), where everything stands; **Stations** (`#stations`), what your agents are doing and what waits on you; **Activity** (`#activity`), what changed while you were away. Only Pass writes.
 
 ## What `kitchen up` starts
 
-`kitchen up --foreground` (the process the user service runs) starts three things, and `kitchen down` stops all three with the service (`--once`, the one-tick check by hand, serves nothing):
+`kitchen up --foreground` (the process the user service runs) starts two things, and `kitchen down` stops both with the service (`--once`, the one-tick check by hand, serves nothing):
 
 | What | Where | Why |
 | --- | --- | --- |
 | The expeditor | this process | the tick |
-| `bd serve` | `127.0.0.1:<port+1>`, 4818 by default; a free port of the host's choosing under `--port 0` | the beads HTTP API over the space, as a child the expeditor stops on exit |
-| The UI server | `127.0.0.1:<port>`, 4817 by default | the bundled page, `/me`, and every `/v0/...` request passed through to `bd serve` |
+| The UI server | `127.0.0.1:<port>`, 4817 by default | the bundled page, `/me`, and the API: every `/v0/...` request answered with `bd` over the space connection |
 
-`--port` on `kitchen up` sets the UI port and is written into the service unit; `bd serve` takes the next port. `--port 0`, for a check by hand, gives the UI an ephemeral port and `bd serve` a free port the expeditor picks (bd serve needs the port on its command line, so the expeditor binds port 0 once to learn a free one and releases it), so two such runs on one host do not collide. Both bind loopback only: nothing on the network reaches either without a tunnel you set up yourself (below). The expeditor's log line `{"step":"serve","ui":...,"api":...,"token":...}` says where each listens.
+`--port` on `kitchen up` sets the port and is written into the service unit. `--port 0`, for a check by hand, gives an ephemeral port, so two such runs on one host do not collide. It binds loopback only: nothing on the network reaches it without a tunnel you set up yourself (below). The expeditor's log line `{"step":"serve","ui":...,"token":...}` says where it listens and where the token is.
 
-`bd serve` needs the space's Dolt SQL server (`docs/onboarding.md`); it refuses to start otherwise. When it exits on its own the expeditor keeps ticking, logs one line `{"step":"serve","ended":"bd serve exited <code>","stderr":...}`, and every `/v0/...` request through the UI answers 502 naming the port nothing listens on. `kitchen down` then `kitchen up` starts it again.
+## The API
+
+The views speak the shape of bd serve's routes (`/v0/beads/...`), and the UI server answers each with one `bd` call over the space connection every other call of Kitchen uses, which is what lets a local space (an embedded beads workspace, where `bd serve` cannot run) serve the same page as a shared one:
+
+| Route | bd call | Answer |
+| --- | --- | --- |
+| `GET /v0/beads/issues?type=&status=&label=&assignee=&parent=&limit=` | `bd list` with the same narrowing, as the owner | `{"items": [...]}` |
+| `GET /v0/beads/ready?assignee=&limit=` | `bd ready` | `{"items": [...]}` |
+| `GET /v0/beads/issues/<id>` | `bd show` | the bead; 404 with bd's words when there is none |
+| `GET /v0/beads/events?since=&limit=` | `bd events tail --since --limit --json` | `{"head": <seq>, "records": [...]}` |
+| `POST /v0/beads/issues/<id>:close` `{"actor","reason"}` | `bd show`, then `bd close --reason` under the actor named | 200; 400 without an actor or a word, 404 with bd's words when there is no such bead, 409 when already closed, 403 when the space wrapper refuses the actor |
+| `GET /healthz` | none | 200, no token needed |
+
+`limit=0` asks for everything, as bd does; a `limit` or `since` that is not a whole number is a 400 on every route, before any `bd` call. The journal's head, the highest sequence number so far, is learnt by tailing forward from the last head this process saw: the whole journal on the first request after a start, the new records after that. bd retains a bounded window of the journal and fails a read below it rather than skipping ahead, so a read that lands below the floor takes the head from bd's answer and is retried from the oldest retained record, with the gap. Any other failure of a `bd` call is a 409 `bd_refused` carrying bd's stderr. A refusal is `{"code","detail","status","title"}`, the shape the views read.
+
+Reads run as the owner, the person the page serves. A close runs as the actor the body names, the owner's name the view sends from `/me`, and goes through the space wrapper like any write, so a station or expeditor actor named there is refused (403) before any `bd close`, the same cooperative rule the CLI applies (`docs/trust-model.md`).
 
 ## The token
 
@@ -24,13 +38,13 @@ At every start the expeditor generates a fresh token, 32 random bytes as hex, an
 ~/.local/state/kitchen/serve.token      ($XDG_STATE_HOME/kitchen/serve.token)
 ```
 
-with mode 0600, whole and renamed into place. `bd serve` runs with `--auth-token-file` pointing at it, so every request to the API needs `Authorization: Bearer <token>`, `/healthz` excepted; without it bd serve answers 401. `bd serve` re-reads the file while running, so a token written there is live within a second and a line removed stops working as fast.
+with mode 0600, whole and renamed into place. Every `/v0/...` request needs `Authorization: Bearer <token>`, `/healthz` excepted; without it the answer is 401 and no `bd` call is made. The file is re-read at each request, so a line added there is live at once and a line removed stops working as fast.
 
-The token is yours, the way the credential is: whoever holds it can read every bead and close passes under any actor they name. Read it from the file on the host (`cat ~/.local/state/kitchen/serve.token`) and paste it into the UI once; the page keeps it in the browser's local storage and asks again when bd serve refuses it. Do not paste it into the space, an issue or a commit. Restarting the expeditor (`kitchen down`, `kitchen up`) rotates it.
+The token is yours, the way the credential is: whoever holds it can read every bead and close passes under any actor they name. Read it from the file on the host (`cat ~/.local/state/kitchen/serve.token`) and paste it into the UI once; the page keeps it in the browser's local storage and asks again when it is refused. Do not paste it into the space, an issue or a commit. Restarting the expeditor (`kitchen down`, `kitchen up`) rotates it.
 
 ## No credentials in the UI
 
-The SQL password lives in the beads credentials file on the host and is read by `bd` alone: by the `bd` commands the CLI and the expeditor run, and by the `bd serve` child. The UI server passes a request through to `bd serve` with the bearer token the browser sent and nothing of its own; it serves files and answers `/me` (the owner and host from the host config, no secret). The page, its script and the browser hold the token and your name, never the credential. A token that leaks costs a restart; a credential that leaks costs a rotation on the server (`docs/onboarding.md`).
+The SQL password of a shared space lives in the beads credentials file on the host and is read by `bd` alone, the `bd` commands the CLI, the expeditor and the UI server run; a local space has none. The UI server answers a request with the bearer token the browser sent and nothing of its own; it serves files and answers `/me` (the owner and host from the host config, no secret). The page, its script and the browser hold the token and your name, never the credential. A token that leaks costs a restart; a credential that leaks costs a rotation on the server (`docs/onboarding.md`).
 
 ## The Pass view
 
@@ -40,7 +54,7 @@ The page lists every open gate of type `human` from `GET /v0/beads/issues?type=g
 POST /v0/beads/issues/<pass>:close   {"actor": "<owner>", "reason": "<word>"}
 ```
 
-so the word is the pass's close reason, as `kitchen pass` writes it, and the phase laid behind the pass becomes ready for the next tick. The actor is the owner from `/me`: the bare human name. The view refuses, before any request, to close under a station or expeditor actor (`sona/oven`, `sona/expeditor`), the same cooperative rule the `bd` wrapper and the CLI apply (`docs/trust-model.md`); the rule is cooperative, and nothing in bd serve stops a caller who names the owner as the actor themselves.
+so the word is the pass's close reason, as `kitchen pass` writes it, and the phase laid behind the pass becomes ready for the next tick. The actor is the owner from `/me`: the bare human name. The view refuses, before any request, to close under a station or expeditor actor (`sona/oven`, `sona/expeditor`), and the server refuses the same actors again through the space wrapper; the rule is cooperative, and nothing stops a caller who names the owner as the actor themselves (`docs/trust-model.md`).
 
 ## The Orders view
 
@@ -58,16 +72,16 @@ There is no start button in v1 (spec: out of scope): the turn is attended, so it
 
 ## The Activity view
 
-The latest fifty records of the events journal, newest first, each with when, who (the actor: you, a station or the expeditor), what (`create`, `update`, `close`, `dep_add`, as the journal names it), the bead with its title, and a detail: the close reason, the dependency added, or the bead's status and station. The journal route reads forward from a sequence number (`GET /v0/beads/events?since=<seq>&limit=<n>`), so the view asks for the head first and then for the fifty records behind it. A space whose journal is off (`bd config set events-journal true` on the server; `scripts/install-server.sh` sets it) shows bd serve's refusal instead.
+The latest fifty records of the events journal, newest first, each with when, who (the actor: you, a station or the expeditor), what (`create`, `update`, `close`, `dep_add`, as the journal names it), the bead with its title, and a detail: the close reason, the dependency added, or the bead's status and station. The journal route reads forward from a sequence number (`GET /v0/beads/events?since=<seq>&limit=<n>`), so the view asks for the head first and then for the fifty records behind it. `kitchen init` turns the journal on for every space. On a space where it was turned off since, `bd events tail` fails, and the view shows that refusal with bd's words (409 `bd_refused`); a journal pruned below the fifty asked for shows what bd still retains.
 
-The UI is tested at two seams: each view's data layer against a scripted `fetch` (`ui/passes.test.ts`, `ui/orders.test.ts`, `ui/stations.test.ts`, `ui/activity.test.ts`, all through `ui/scripted-fetch.ts`) and the server at its HTTP port against a stand-in for `bd serve` (`src/expeditor/ui.test.ts`). The page itself, and the navigation between the views, is exercised by the hand-run smoke.
+The UI is tested at two seams: each view's data layer against a scripted `fetch` (`ui/passes.test.ts`, `ui/orders.test.ts`, `ui/stations.test.ts`, `ui/activity.test.ts`, all through `ui/scripted-fetch.ts`) and the server at its HTTP port against the fake command runner standing in for `bd` (`src/expeditor/ui.test.ts`). The page itself, and the navigation between the views, is exercised by the hand-run smoke.
 
 ## Reaching it from a phone
 
-Both ports are loopback-only, and `bd serve` answers only to a loopback `Host` header, so the way in is a tunnel that ends on the host and opens `http://localhost:4817` on your side. The expeditor sets none up; pick one:
+The port is loopback-only, so the way in is a tunnel that ends on the host and opens `http://localhost:4817` on your side. The expeditor sets none up; pick one:
 
 - **SSH from the phone.** With an SSH client app that forwards ports (Termius, Blink, Termux's `ssh`), forward local 4817 to `127.0.0.1:4817` on the host (`ssh -N -L 4817:127.0.0.1:4817 <host>`), then open `http://localhost:4817` in the phone's browser. One port is enough: the page and the API share it.
-- **Tailscale.** On the host, `tailscale serve --bg 4817` publishes the UI port to your tailnet over HTTPS at `https://<host>.<tailnet>.ts.net`; the phone on the same tailnet opens that. Tailscale terminates the TLS and reaches the UI server on loopback, so bd serve still sees a loopback `Host`. Only your tailnet reaches it, and only with the token.
+- **Tailscale.** On the host, `tailscale serve --bg 4817` publishes the UI port to your tailnet over HTTPS at `https://<host>.<tailnet>.ts.net`; the phone on the same tailnet opens that. Only your tailnet reaches it, and only with the token.
 
 In both cases the token is the second lock. Paste it on the phone the first time; the browser keeps it.
 

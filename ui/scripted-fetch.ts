@@ -1,6 +1,6 @@
 // The UI's test seam: a `fetch` scripted from a table of exchanges, recording every request it
 // answers, the way the fake runner scripts `bd` for the CLI and the expeditor. Each view's data layer
-// is exercised through the requests it makes to bd serve and nothing else.
+// is exercised through the requests it makes to the API and nothing else.
 
 export interface Exchange {
   method: string;

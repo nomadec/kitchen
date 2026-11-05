@@ -1,8 +1,22 @@
 # Onboarding: a person, then a host
 
-Kitchen has one team space: a `kitchen` database on a Dolt SQL server on rbn3, reached over Tailscale. Every person has one SQL credential, used by that person and by every station they own. Every host runs one expeditor and the stations registered on it. This doc walks both through to a first `kitchen status`.
+The team's shared space is a `kitchen` database on a Dolt SQL server on rbn3, reached over Tailscale. Every person has one SQL credential, used by that person and by every station they own. Every host runs one expeditor and the stations registered on it. This doc walks both through to a first `kitchen status`.
 
 The space starts empty. Nothing is imported from Umka.
+
+## One person, one machine: a local space
+
+A person working alone needs no server and no credential. `kitchen init --local` makes a space of this host's own, an embedded beads workspace under `~/.config/kitchen/space`, and every command and the UI work against it as against the shared space; only a second host cannot join it. The whole setup is four commands on a host with Node 24 and bd 1.3.1 on the path (step 2 below has the bd install):
+
+```sh
+npm install -g @nomadec/kitchen
+kitchen init --local --owner <name>
+kitchen recipe add <plugin directory>
+kitchen station add <station.json> --repo <slug>=<local path> --cap 1 --timeout 45m
+kitchen up
+```
+
+Then `kitchen order add` and the UI at `http://127.0.0.1:4817` as in step 4 under **Onboarding a host**. Moving to the shared space later: remove the local space first (`rm -r ~/.config/kitchen/space`), then `kitchen init --server ...` on the same host, which creates the workspace against the server. The local space's beads are not carried over, so nothing is lost in the removal that a re-init would have kept.
 
 ## The server
 
@@ -98,12 +112,12 @@ A host is a machine with one expeditor and the stations registered on it. Each h
    kitchen up
    ```
 
-   On Linux this installs a systemd user service, on macOS a launchd agent; `kitchen down` removes it. The expeditor polls the space for phases assigned to this host's stations, starts unattended ones up to each station's cap, and lists attended ones as waiting for you to run with `kitchen turn <phase>`. It also serves the UI on `http://127.0.0.1:4817` and runs `bd serve` behind a token it writes to `~/.local/state/kitchen/serve.token`; paste that token into the page once. `docs/ui.md` says how to reach the page from a phone.
+   On Linux this installs a systemd user service, on macOS a launchd agent; `kitchen down` removes it. The expeditor polls the space for phases assigned to this host's stations, starts unattended ones up to each station's cap, and lists attended ones as waiting for you to run with `kitchen turn <phase>`. It also serves the UI on `http://127.0.0.1:4817` behind a token it writes to `~/.local/state/kitchen/serve.token`; paste that token into the page once. `docs/ui.md` says how to reach the page from a phone.
 
 5. `kitchen status` now shows the expeditor running with its last tick, this host's stations with their caps, running turns, waiting attended phases and open passes. The host is in.
 
 ## What is shared and what is not
 
 - The space is shared: every person and every station reads and writes the same graph, each write under its actor.
-- A credential is per person and shared with that person's stations only. The trust model is cooperative: Kitchen's `bd` wrapper, CLI and UI refuse station writes to `phase`, `station` and `source` beads and the closing of a pass, and nothing stops a station that reaches bd, the HTTP API or the database directly. Hand a credential to a person, never to a bead.
+- A credential is per person and shared with that person's stations only. The trust model is cooperative: Kitchen's `bd` wrapper, CLI and UI refuse station writes to `phase`, `station` and `source` beads and the closing of a pass, and nothing stops a station that reaches bd or the database directly. Hand a credential to a person, never to a bead.
 - The Dolt root user is the server's own and is never handed out.

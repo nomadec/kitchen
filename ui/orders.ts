@@ -1,4 +1,4 @@
-// The Orders view's data layer (spec: UI, story 66): every open order read from bd serve, and the
+// The Orders view's data layer (spec: UI, story 66): every open order read from the API, and the
 // orders closed last, grouped by status, each with its class, the recipe revision it pinned and the
 // phases it is at now, read from its open children. Reads only. No DOM here: the view is tested at
 // this seam.

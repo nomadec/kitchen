@@ -1,5 +1,5 @@
 // The Activity view's data layer against a scripted fetch: the latest records of the events journal,
-// newest first, each with when, who, what and to which bead, read from bd serve's events route.
+// newest first, each with when, who, what and to which bead, read from the API's events route.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { activityView } from "./activity.ts";
@@ -68,11 +68,11 @@ test("a journal shorter than the count is read from its beginning, and an empty 
   assert.equal(empty.requests.length, 1);
 });
 
-test("a journal bd serve does not keep is reported with its detail, and a refused token with its status", async () => {
+test("a journal the API does not keep is reported with its detail, and a refused token with its status", async () => {
   const off = scriptedFetch([{ method: "GET", url: HEAD, status: 400, body: '{"code":"invalid_argument","detail":"the durable events journal is not enabled on this workspace; set `events-journal true` and restart the server"}' }]);
   await assert.rejects(
     () => activityView({ fetch: off.fetch, token: "tok123" }).latest(),
-    (error: unknown) => error instanceof Error && error.message === "bd serve refused the events journal: the durable events journal is not enabled on this workspace; set `events-journal true` and restart the server",
+    (error: unknown) => error instanceof Error && error.message === "the space refused the events journal: the durable events journal is not enabled on this workspace; set `events-journal true` and restart the server",
   );
   const refused = scriptedFetch([{ method: "GET", url: HEAD, status: 401, body: '{"code":"unauthenticated","detail":"missing or invalid bearer token"}' }]);
   await assert.rejects(() => activityView({ fetch: refused.fetch, token: "stale" }).latest(), (error: unknown) => error instanceof Error && (error as { status?: number }).status === 401);

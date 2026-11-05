@@ -6,8 +6,12 @@ import path from "node:path";
 import type { CliDeps } from "../cli.ts";
 import type { HostConfig } from "../config.ts";
 import { fakeClock } from "./fake-clock.ts";
+import { credentialEnv } from "../space.ts";
 import { fakeRunner } from "./fake-runner.ts";
 import type { FakeRunner, ScriptedAnswer } from "./fake-runner.ts";
+
+/** A host whose space is local: an embedded beads workspace, no server and no credential. */
+export const LOCAL_HOST_CONFIG: HostConfig = { owner: "sona", host: "sona-laptop" };
 
 export const TEST_HOST_CONFIG: HostConfig = {
   server: { host: "rbn3", port: 3307, user: "sona", database: "kitchen" },
@@ -26,7 +30,7 @@ export interface InitialisedHost {
   configDir: string;
   configFile: string;
   /** The connection every bd call from this host runs over. */
-  connection: { cwd: string; env: { BEADS_CREDENTIALS_FILE: string } };
+  connection: { cwd: string; env: Record<string, string> };
 }
 
 export interface HostOptions {
@@ -68,6 +72,6 @@ export function initialisedHost(t: { after(fn: () => void): void }, table: reado
   };
   return {
     deps, runner, out, err, home, configDir, configFile,
-    connection: { cwd: path.join(configDir, "space"), env: { BEADS_CREDENTIALS_FILE: config.credential } },
+    connection: { cwd: path.join(configDir, "space"), env: credentialEnv(config) },
   };
 }

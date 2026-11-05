@@ -33,7 +33,7 @@ What the rules protect against is an agent drifting into registration, or answer
 
 Every person and their stations share that person's one SQL credential, on that person's own host, and beads treats the actor as provenance, not as authenticated identity. So:
 
-- a station that runs `bd` directly, calls `bd serve` over HTTP, or opens the database, is not stopped;
+- a station that runs `bd` directly, calls the UI's API with the token, or opens the database, is not stopped;
 - a station that passes `--actor <owner>` itself is recorded as the owner, and nothing in Kitchen, beads or the server can tell the difference;
 - a hostile agent is outside what v1 protects against. A station runs with its owner's own trust on its owner's own host, and no component of Kitchen claims that a station is technically unable to act as its owner.
 

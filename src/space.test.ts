@@ -6,7 +6,7 @@ import path from "node:path";
 import { expeditorActor, humanActor, resolveActor, stationActor } from "./actor.ts";
 import type { Actor } from "./actor.ts";
 import type { HostConfig } from "./config.ts";
-import { openSpace } from "./space.ts";
+import { JournalTruncatedError, openSpace, SpaceError } from "./space.ts";
 import { fakeRunner } from "./testing/index.ts";
 import type { ScriptedAnswer } from "./testing/index.ts";
 
@@ -199,8 +199,18 @@ test("the helpers later slices build on are thin argv builders over bd 1.3.1", a
     ["bd", "--actor", "sona/grill", "gate", "create", "--type", "human", "--blocks", "kitchen-1.3", "--title", "pass: grill", "--reason", "Approve the grill?", "--json"],
     ["bd", "--actor", "sona/grill", "gate", "list", "--limit", "0", "--json"],
     ["bd", "--actor", "sona/grill", "gate", "check", "--type", "gh:pr", "--json"],
-    ["bd", "--actor", "sona/grill", "events", "tail", "--since", "40"],
+    ["bd", "--actor", "sona/grill", "events", "tail", "--since", "40", "--json"],
   ]);
+});
+
+test("a journal read below the retention floor is a JournalTruncatedError naming bd's floor and head; any other failure stays a SpaceError", async () => {
+  const truncated = JSON.stringify({ code: "events_journal_truncated", error: "events journal truncated: checkpoint 0 is below the retained window [3..5]; records 1..2 were pruned", floor: 3, head: 5, schema_version: 1, since: 0 });
+  const { space: s } = space(humanActor("sona"), [
+    { command: "bd", args: ["--actor", "sona", "events", "tail", "--since", "0"], exitCode: 1, stdout: truncated },
+    { command: "bd", args: ["--actor", "sona", "events", "tail", "--since", "9"], exitCode: 1, stderr: "Error: events journal is not enabled" },
+  ]);
+  await assert.rejects(() => s.events(0), (error: unknown) => error instanceof JournalTruncatedError && error.floor === 3 && error.head === 5);
+  await assert.rejects(() => s.events(9), (error: unknown) => error instanceof SpaceError && !(error instanceof JournalTruncatedError) && /not enabled/.test(error.message));
 });
 
 test("a bd call that fails surfaces its argv and stderr", async () => {

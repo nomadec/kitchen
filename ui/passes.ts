@@ -1,4 +1,4 @@
-// The Pass view's data layer (spec: UI, stories 62, 63, 69): open passes read from bd serve, through the
+// The Pass view's data layer (spec: UI, stories 62, 63, 69): open passes read from the API, through the
 // expeditor's own port, with a bearer token; the answer posted as the close of the gate with the word
 // as its reason and the human's name as the actor. The UI holds the token and the name, never the
 // SQL credential. A station or the expeditor is refused before any request, the same cooperative rule
@@ -13,7 +13,7 @@ export interface Pass {
   title: string;
   /** What the station wrote for the human: the reason of the gate. */
   brief: string;
-  /** The order the pass belongs to; its title is undefined when bd serve cannot show the order. */
+  /** The order the pass belongs to; its title is undefined when the API cannot show the order. */
   order: { id: string; title: string | undefined };
   /** Who laid the pass: the station's actor, or the expeditor on a pass Kitchen laid. */
   laidBy: string | undefined;
@@ -31,7 +31,7 @@ export interface PassViewDeps extends ClientDeps {
   actor: string;
 }
 
-/** A gate bead as bd serve lists it; only the fields the view reads are named. */
+/** A gate bead as the API lists it; only the fields the view reads are named. */
 interface GateRow {
   id: string;
   title: string;

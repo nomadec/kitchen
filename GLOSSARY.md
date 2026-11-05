@@ -56,9 +56,13 @@ Where orders come from: a tracker, a file, or free text. A polled source is regi
 
 One pass of the expeditor over the work graph.
 
-## Team space
+## Shared space
 
-The work graph every member and every station can read and write.
+A space every member and every station can read and write: a database on a Dolt SQL server every host of the team points at. The team has one.
+
+## Local space
+
+A space of one host's own: an embedded beads workspace under that host's config, with no server to join and no credential. Every command and the UI work against it as against a shared space; a second host cannot point at it, and a station handoff across hosts needs a shared space.
 
 ## Host
 
@@ -70,7 +74,7 @@ The part of a station that says how to start a turn: provider, the models it can
 
 ## Space
 
-One work graph: the beads database an order, a station and a pass live in. Kitchen has one team space.
+One work graph: the beads database an order, a station and a pass live in. A host has one space, shared or local.
 
 ## Registration
 
